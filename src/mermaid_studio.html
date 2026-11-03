@@ -55,10 +55,6 @@
       </select>
     </div>
     <div class="flex items-center space-x-1.5">
-      <div class="flex bg-slate-800 p-0.5 rounded-md lg:hidden border border-slate-700">
-        <button id="tabCode" onclick="switchTab('code')" class="px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-slate-100 transition">Code</button>
-        <button id="tabPreview" onclick="switchTab('preview')" class="px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow">Preview</button>
-      </div>
       <label class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-200 text-xs font-medium flex items-center space-x-1 cursor-pointer transition">
         <i data-lucide="folder-open" class="w-3.5 h-3.5 text-amber-400"></i>
         <span class="hidden sm:inline">Open</span>
@@ -79,21 +75,22 @@
     </div>
   </header>
   <main id="dropZone" class="flex-1 flex relative overflow-hidden">
-    <section id="editorPanel" class="w-full lg:w-5/12 h-full bg-slate-900 flex flex-col border-r border-slate-800 z-10 hidden lg:flex">
-      <div class="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0">
+    <section id="editorPanel" class="absolute bottom-12 left-3 w-80 sm:w-96 max-h-[320px] bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all overflow-hidden">
+      <div class="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0 h-9">
         <span class="font-mono text-[11px] text-slate-400 flex items-center gap-1.5"><i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-500"></i> diagram.mmd</span>
         <div class="flex items-center space-x-2">
+          <button id="editorToggleBtn" onclick="toggleEditorPanel()" title="Collapse / expand editor" class="hover:text-slate-200 transition flex items-center"><i data-lucide="chevron-down" class="w-4 h-4"></i></button>
           <button onclick="renderDiagram()" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded font-semibold text-[11px] flex items-center gap-1 shadow transition"><i data-lucide="play" class="w-3 h-3 fill-current"></i> Render</button>
           <button onclick="formatCode()" class="hover:text-slate-200 transition flex items-center gap-1 ml-1"><i data-lucide="align-left" class="w-3 h-3"></i> Format</button>
           <button onclick="clearCode()" class="hover:text-rose-400 transition flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Clear</button>
         </div>
       </div>
-      <div class="flex-1 relative overflow-hidden flex">
+      <div id="editorBody" class="h-[280px] relative overflow-hidden flex">
         <div id="lineNumbers" class="w-10 bg-slate-950/60 text-slate-600 text-right pr-2 pt-3 font-mono text-xs select-none border-r border-slate-800/50 shrink-0">1</div>
         <textarea id="mermaidCode" spellcheck="false" class="code-input flex-1 h-full w-full bg-transparent text-slate-200 p-3 text-xs leading-relaxed focus:outline-none resize-none overflow-auto" placeholder="Type or paste Mermaid syntax here..."></textarea>
       </div>
     </section>
-    <section id="previewPanel" class="w-full lg:w-7/12 h-full bg-slate-950 bg-grid-pattern relative flex flex-col flex-1 overflow-hidden">
+    <section id="previewPanel" class="w-full h-full bg-slate-950 bg-grid-pattern relative flex flex-col flex-1 overflow-hidden">
       <div id="errorBanner" class="hidden absolute top-3 left-3 right-3 bg-rose-950/90 border border-rose-600/80 text-rose-200 p-3 rounded-lg shadow-xl z-30 max-h-40 overflow-auto backdrop-blur-sm transition-all">
         <div class="flex items-start justify-between">
           <div class="flex items-start space-x-2">
@@ -106,15 +103,15 @@
           <button onclick="dismissError()" class="text-rose-400 hover:text-rose-200 p-0.5"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
       </div>
-      <div class="absolute top-3 right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
+      <div class="absolute bottom-16 right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
         <button onclick="zoomIn()" class="p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition" title="Zoom In"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
         <button onclick="zoomOut()" class="p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition" title="Zoom Out"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
         <button onclick="resetZoom()" class="p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition" title="Reset View"><i data-lucide="maximize-2" class="w-4 h-4"></i></button>
       </div>
-      <div id="canvasContainer" class="w-full h-full flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
+      <div id="canvasContainer" class="absolute inset-0 w-full h-full flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing">
         <div id="mermaidRender" class="w-full h-full flex items-center justify-center"></div>
       </div>
-      <aside id="inspectorDrawer" class="hidden absolute top-0 right-0 bottom-0 w-80 bg-slate-900/95 border-l border-slate-800 shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all">
+      <aside id="inspectorDrawer" class="hidden absolute top-3 right-3 w-80 sm:w-[22rem] max-h-[calc(100vh-180px)] bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all overflow-y-auto">
         <div class="p-3 border-b border-slate-800 flex items-center justify-between">
           <div class="flex items-center space-x-1 bg-slate-800 p-0.5 rounded-md border border-slate-700">
             <button id="tabNodeInspector" onclick="switchInspectorTab('node')" class="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow transition">
@@ -385,7 +382,8 @@
           if (panZoomInstance) panZoomInstance.destroy();
           addEdgeHitPaths(svgElement);
           panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
-          if (pan && zoom) { panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
+          if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
+          else refitCanvas();
         }
         const nodes = (code.match(/\[.*?\]|\(.*?\)|/g) || []).length;
         document.getElementById('nodeCount').textContent = `Nodes: ~${Math.floor(nodes / 2)}`;
@@ -756,12 +754,20 @@
       statusIndicator.innerHTML = `<span class="w-2 h-2 rounded-full ${colorMap[color] || 'bg-slate-500'}"></span><span class="text-slate-300">${text}</span>`;
     }
 
-    function switchTab(tab) {
-      const editorPanel = document.getElementById('editorPanel');
-      const previewPanel = document.getElementById('previewPanel');
-      if (tab === 'code') { editorPanel.classList.remove('hidden'); previewPanel.classList.add('hidden'); }
-      else { editorPanel.classList.add('hidden'); previewPanel.classList.remove('hidden'); if (panZoomInstance) { panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center(); } }
+    function refitCanvas() {
+      if (!panZoomInstance) return;
+      panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center();
     }
+    function toggleEditorPanel() {
+      const body = document.getElementById('editorBody');
+      const collapsed = body.classList.toggle('hidden');
+      const btn = document.getElementById('editorToggleBtn');
+      btn.innerHTML = `<i data-lucide="${collapsed ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4"></i>`;
+      lucide.createIcons();
+      if (panZoomInstance) panZoomInstance.resize();
+    }
+    let resizeTimer;
+    window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(refitCanvas, 100); });
 
     function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
     function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
