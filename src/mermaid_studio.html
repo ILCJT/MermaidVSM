@@ -28,6 +28,7 @@
     </div>
     <div class="flex items-center space-x-2">
       <select id="templateSelect" class="bg-slate-800 border border-slate-700 text-xs text-slate-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[180px] sm:max-w-[240px] truncate">
+        <option value="" selected disabled>Select a template...</option>
         <option value="rma">RMA Process & Ownership</option>
         <option value="swimlanes">Department Swimlanes</option>
         <option value="vsm">Value Stream Process Flow</option>
@@ -166,7 +167,7 @@
       swimlanes: `sequenceDiagram\n    actor C as Customer\n    participant CS as Customer Support\n    participant QA as QA Engineering\n    C->>CS: Submit Return Request\n    CS->>QA: Forward Details`,
       vsm: `graph LR\n    P1["Receiving / Quarantine"] --> I1[/"WIP: 50 Pcs"\\\\] --> P2["Testing & Inspection"]`
     };
-    let projectState = { title: "RMA Process Current State", mermaid: TEMPLATES.rma, metrics: {} };
+    let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {} };
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
     const mermaidRender = document.getElementById('mermaidRender');
@@ -225,7 +226,11 @@
     function debouncedRender() { clearTimeout(renderTimeout); renderTimeout = setTimeout(renderDiagram, 200); }
     async function renderDiagram() {
       const code = mermaidCodeInput.value.trim();
-      if (!code) { mermaidRender.innerHTML = '<p class="text-xs text-slate-500 font-mono">No diagram definition provided.</p>'; updateStatus('Ready', 'emerald'); dismissError(); return; }
+      if (!code) {
+        if (panZoomInstance) { panZoomInstance.destroy(); panZoomInstance = null; }
+        mermaidRender.innerHTML = '<p class="text-xs text-slate-500 font-mono">Open a .vsm.json project file or select a template to begin.</p>';
+        updateStatus('Ready', 'emerald'); dismissError(); return;
+      }
       let pan = null, zoom = null;
       if (panZoomInstance) { pan = panZoomInstance.getPan(); zoom = panZoomInstance.getZoom(); }
       try {
@@ -251,6 +256,7 @@
       activeNodeId = nodeId; document.getElementById('inspectorNodeId').value = nodeId;
       if (!projectState.metrics[nodeId]) { projectState.metrics[nodeId] = { title: nodeId, owner: '', ct: 0, co: 0, wip: 0, friction: false }; }
       const m = projectState.metrics[nodeId];
+      if (!m.title || m.title === nodeId) m.title = getNodeLabel(nodeId) || nodeId;
       document.getElementById('inspectorTitle').value = m.title || nodeId;
       document.getElementById('inspectorOwner').value = m.owner || '';
       document.getElementById('inspectorCT').value = m.ct || 0;
@@ -271,7 +277,47 @@
         wip: parseFloat(document.getElementById('inspectorWIP').value) || 0,
         friction: document.getElementById('inspectorFriction').checked
       };
+      syncNodeToMermaid(activeNodeId, projectState.metrics[activeNodeId]);
       calculateVSMMetrics();
+    }
+
+    function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    function nodeLabelRegex(nodeId) {
+      return new RegExp('(^|[^\\w])(' + escapeRegExp(nodeId) + ')(\\[\\[|\\[\\(|\\(\\(|\\(\\[|\\{\\{|\\[\\/|\\[\\\\|\\[|\\(|\\{|>)(["\']?)(.*?)\\4(\\]\\]|\\)\\]|\\)\\)|\\]\\)|\\}\\}|\\/\\]|\\\\\\]|\\]|\\)|\\})', 'gm');
+    }
+    function getNodeLabel(nodeId) {
+      const match = nodeLabelRegex(nodeId).exec(mermaidCodeInput.value);
+      return match ? match[5] : null;
+    }
+
+    function syncNodeToMermaid(nodeId, m) {
+      let code = mermaidCodeInput.value;
+      const isFlowchart = /^\s*(graph|flowchart)\b/m.test(code);
+      const title = (m.title || '').trim();
+      if (title && title !== getNodeLabel(nodeId)) {
+        const safeTitle = title.replace(/"/g, '#quot;');
+        code = code.replace(nodeLabelRegex(nodeId), (_, pre, id, open, _q, _label, close) => `${pre}${id}${open}"${safeTitle}"${close}`);
+      }
+      if (isFlowchart) {
+        const classLine = new RegExp('^[ \\t]*class[ \\t]+' + escapeRegExp(nodeId) + '[ \\t]+friction;?[ \\t]*$\\n?', 'gm');
+        const hasClass = new RegExp('^[ \\t]*class[ \\t]+' + escapeRegExp(nodeId) + '[ \\t]+friction;?[ \\t]*$', 'm').test(code);
+        if (m.friction && !hasClass) {
+          if (!/^[ \t]*classDef[ \t]+friction\b/m.test(code)) {
+            code = code.replace(/\s*$/, '\n') + '    classDef friction fill:#7f1d1d,stroke:#f43f5e,stroke-width:2px,color:#fecdd3;\n';
+          }
+          code = code.replace(/\s*$/, '\n') + `    class ${nodeId} friction;\n`;
+        } else if (!m.friction && hasClass) {
+          code = code.replace(classLine, '');
+          if (!/^[ \t]*class[ \t]+[^\n]*\bfriction;?[ \t]*$/m.test(code)) {
+            code = code.replace(/^[ \t]*classDef[ \t]+friction\b.*$\n?/gm, '');
+          }
+        }
+      }
+      if (code !== mermaidCodeInput.value) {
+        mermaidCodeInput.value = projectState.mermaid = code;
+        updateLineNumbers();
+        debouncedRender();
+      }
     }
 
     function handleFileDrop(e) { e.preventDefault(); document.getElementById('dropZone').classList.remove('bg-blue-950/20'); if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]); }
