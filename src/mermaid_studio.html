@@ -105,13 +105,47 @@
       </div>
       <aside id="inspectorDrawer" class="hidden absolute top-0 right-0 bottom-0 w-80 bg-slate-900/95 border-l border-slate-800 shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all">
         <div class="p-3 border-b border-slate-800 flex items-center justify-between">
-          <div class="flex items-center space-x-2">
-            <i data-lucide="sliders" class="w-4 h-4 text-blue-400"></i>
-            <h3 class="text-xs font-bold text-slate-100">Node Inspector</h3>
+          <div class="flex items-center space-x-1 bg-slate-800 p-0.5 rounded-md border border-slate-700">
+            <button id="tabNodeInspector" onclick="switchInspectorTab('node')" class="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow transition">
+              <i data-lucide="sliders" class="w-3.5 h-3.5"></i><span>Node Inspector</span>
+            </button>
+            <button id="tabEdgeInspector" onclick="switchInspectorTab('edge')" class="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-slate-100 transition">
+              <i data-lucide="spline" class="w-3.5 h-3.5"></i><span>Edge Inspector</span>
+            </button>
           </div>
           <button onclick="closeInspector()" class="text-slate-400 hover:text-slate-200 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
-        <div class="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
+        <div id="edgeInspectorPanel" class="hidden p-4 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Edge Identifier</label>
+            <input type="text" id="inspectorEdgeId" readonly class="w-full bg-slate-950 border border-slate-800 text-slate-400 rounded px-2.5 py-1.5 font-mono">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Line Label / Annotation</label>
+            <input type="text" id="inspectorEdgeLabel" oninput="updateActiveEdgeFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-blue-500" placeholder="e.g. Yes / Approved">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Line Style</label>
+            <select id="inspectorEdgeStyle" onchange="updateActiveEdgeFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-blue-500">
+              <option value="solid">Solid (--&gt;)</option>
+              <option value="dotted">Dotted (-.-&gt;)</option>
+              <option value="thick">Thick (==&gt;)</option>
+              <option value="invisible">Invisible Spacer (~~~)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Arrowhead Type</label>
+            <select id="inspectorEdgeArrow" onchange="updateActiveEdgeFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-blue-500">
+              <option value="directed">Single Arrow (--&gt;)</option>
+              <option value="bidirectional">Double Arrow (&lt;--&gt;)</option>
+              <option value="circle">Circle / Dot (--o)</option>
+              <option value="cross">Cross / Stop (--x)</option>
+              <option value="open">Open Link (---)</option>
+            </select>
+          </div>
+          <p id="inspectorEdgeNote" class="hidden text-[11px] text-amber-300"></p>
+        </div>
+        <div id="nodeInspectorPanel" class="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
           <div>
             <label class="block text-[11px] font-semibold text-slate-400 mb-1">Node ID</label>
             <input type="text" id="inspectorNodeId" readonly class="w-full bg-slate-950 border border-slate-800 text-slate-400 rounded px-2.5 py-1.5 font-mono">
@@ -221,7 +255,7 @@
       }
     };
     let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {} };
-    let panZoomInstance = null, renderTimeout = null, activeNodeId = null;
+    let panZoomInstance = null, renderTimeout = null, activeNodeId = null, activeEdge = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
     const mermaidRender = document.getElementById('mermaidRender');
     const errorBanner = document.getElementById('errorBanner');
@@ -242,6 +276,8 @@
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-blue-950/20'));
       dropZone.addEventListener('drop', handleFileDrop);
       mermaidRender.addEventListener('click', (e) => {
+        const edgeEl = e.target.closest('.edgePath, .edgeLabel, g.edgePaths path, g.edgeLabels');
+        if (edgeEl && openEdgeInspectorFromElement(edgeEl)) return;
         const targetEl = e.target.closest('.node, .actor, .actor-box, .role, .stateGroup');
         if (targetEl) {
           let nodeId = (targetEl.id || '').replace(/^(flowchart|actor|state)-/, '').replace(/-\d+$/, '');
@@ -255,6 +291,7 @@
           projectState.title = selected.title;
           projectState.mermaid = selected.mermaid;
           projectState.metrics = JSON.parse(JSON.stringify(selected.metrics || {}));
+          projectState.edges = {};
           mermaidCodeInput.value = selected.mermaid;
           closeInspector();
           updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
@@ -323,10 +360,23 @@
       document.getElementById('inspectorCO').value = m.co || 0;
       document.getElementById('inspectorWIP').value = m.wip || 0;
       document.getElementById('inspectorFriction').checked = !!m.friction;
+      switchInspectorTab('node');
       inspectorDrawer.classList.remove('hidden');
     }
 
-    function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; }
+    function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; activeEdge = null; }
+
+    function switchInspectorTab(tab) {
+      const isEdge = tab === 'edge';
+      document.getElementById('nodeInspectorPanel').classList.toggle('hidden', isEdge);
+      document.getElementById('edgeInspectorPanel').classList.toggle('hidden', !isEdge);
+      const active = ['bg-blue-600', 'text-white', 'shadow'], inactive = ['text-slate-400', 'hover:text-slate-100'];
+      [['tabNodeInspector', !isEdge], ['tabEdgeInspector', isEdge]].forEach(([id, on]) => {
+        const btn = document.getElementById(id);
+        btn.classList.remove(...(on ? inactive : active));
+        btn.classList.add(...(on ? active : inactive));
+      });
+    }
     function updateActiveNodeFromInspector() {
       if (!activeNodeId) return;
       projectState.metrics[activeNodeId] = {
@@ -375,6 +425,127 @@
       }
       if (code !== mermaidCodeInput.value) {
         mermaidCodeInput.value = projectState.mermaid = code;
+        updateLineNumbers();
+        debouncedRender();
+      }
+    }
+
+    const EDGE_SKIP = /^\s*(?:(?:classDef|class|style|linkStyle|subgraph|click|direction|end)\b|%%)/;
+    const EDGE_CONN = /(<)?(?:(?:--|==|-\.)[ \t]+[^\n]*?[ \t]+(?:-{2,}|={2,}|\.-)[>ox]?|(?:-{2,}|={2,}|-\.+-?|~{3,})[>ox]?(?:[ \t]*\|[^|\n]*\|)?)/g;
+
+    function maskMermaidLine(line) {
+      let out = line.replace(/"[^"]*"/g, s => '\u0001'.repeat(s.length));
+      let prev;
+      do { prev = out; out = out.replace(/[\[({][^\[\](){}]*[\])}]/g, s => '\u0001'.repeat(s.length)); } while (out !== prev);
+      return out;
+    }
+    function cleanEdgeLabel(s) { return (s || '').trim().replace(/^"([\s\S]*)"$/, '$1').replace(/#quot;/g, '"').trim(); }
+    function headToArrow(h) { return h === '>' ? 'directed' : h === 'o' ? 'circle' : h === 'x' ? 'cross' : 'open'; }
+
+    function parseMermaidConnector(text) {
+      let m = text.match(/^(<)?(--|==|-\.)[ \t]+([\s\S]*?)[ \t]+(?:-{2,}|={2,}|\.-)([>ox])?$/);
+      if (m) {
+        return { label: cleanEdgeLabel(m[3]), style: m[2] === '==' ? 'thick' : m[2] === '-.' ? 'dotted' : 'solid', arrow: m[1] ? 'bidirectional' : headToArrow(m[4]) };
+      }
+      m = text.match(/^(<)?(-{2,}|={2,}|-\.+-?|~{3,})([>ox])?(?:[ \t]*\|([^|]*)\|)?$/);
+      if (!m) return null;
+      const body = m[2];
+      return { label: cleanEdgeLabel(m[4]), style: body[0] === '~' ? 'invisible' : body[0] === '=' ? 'thick' : body.includes('.') ? 'dotted' : 'solid', arrow: m[1] ? 'bidirectional' : headToArrow(m[3]) };
+    }
+
+    function buildMermaidConnector(style, arrow, label) {
+      if (style === 'invisible') return '~~~';
+      const S = {
+        solid: { lead: '--', tail: '', open: '-', end: '--' },
+        thick: { lead: '==', tail: '', open: '=', end: '==' },
+        dotted: { lead: '-.', tail: '-', open: '', end: '.-' }
+      }[style] || { lead: '--', tail: '', open: '-', end: '--' };
+      const head = { directed: '>', bidirectional: '>', circle: 'o', cross: 'x' }[arrow] || '';
+      const pre = arrow === 'bidirectional' ? '<' : '';
+      const safe = (label || '').trim().replace(/"/g, '#quot;');
+      if (!safe) return pre + S.lead + S.tail + (head || S.open);
+      return `${pre}${S.lead} "${safe}" ${S.end}${head || S.open}`;
+    }
+
+    function parseMermaidEdges(code) {
+      const edges = [];
+      if (!/^\s*(graph|flowchart)\b/m.test(code)) return edges;
+      const counts = {};
+      let offset = 0;
+      code.split('\n').forEach(line => {
+        const lineStart = offset; offset += line.length + 1;
+        if (EDGE_SKIP.test(line)) return;
+        const masked = maskMermaidLine(line);
+        const conns = [...masked.matchAll(EDGE_CONN)];
+        conns.forEach((m, i) => {
+          const prevEnd = i ? conns[i - 1].index + conns[i - 1][0].length : 0;
+          const nextStart = i + 1 < conns.length ? conns[i + 1].index : masked.length;
+          const src = (masked.slice(prevEnd, m.index).split('&').pop().match(/^\s*(\w+)/) || [])[1];
+          const tgt = (masked.slice(m.index + m[0].length, nextStart).split('&')[0].match(/^\s*(\w+)/) || [])[1];
+          const parsed = parseMermaidConnector(line.slice(m.index, m.index + m[0].length));
+          if (!src || !tgt || !parsed) return;
+          const pair = src + '\0' + tgt;
+          const idx = counts[pair] = (counts[pair] ?? -1) + 1;
+          edges.push({ src, tgt, idx, start: lineStart + m.index, end: lineStart + m.index + m[0].length, ...parsed });
+        });
+      });
+      return edges;
+    }
+
+    function edgeKey(e) { return `${e.src}_to_${e.tgt}${e.idx ? '_' + (e.idx + 1) : ''}`; }
+
+    function openEdgeInspectorFromElement(el) {
+      const edges = parseMermaidEdges(mermaidCodeInput.value);
+      if (!edges.length) return false;
+      const pathEl = el.matches('path') ? el : el.querySelector('path');
+      const rawId = pathEl?.id || el.querySelector('[data-id]')?.getAttribute('data-id') || el.getAttribute('data-id') || '';
+      const idxMatch = rawId.match(/[-_](\d+)$/);
+      const cls = pathEl?.getAttribute('class') || '';
+      const ls = cls.match(/\bLS-(\S+)/), le = cls.match(/\bLE-(\S+)/);
+      let edge = rawId && edges.find(e => [`L-${e.src}-${e.tgt}-${e.idx}`, `L_${e.src}_${e.tgt}_${e.idx}`].includes(rawId));
+      if (!edge && ls && le) edge = edges.find(e => e.src === ls[1] && e.tgt === le[1] && e.idx === (idxMatch ? Number(idxMatch[1]) : 0));
+      if (!edge && el.classList.contains('edgeLabel')) {
+        edge = edges[[...el.parentElement.children].filter(c => c.classList.contains('edgeLabel')).indexOf(el)];
+      }
+      if (!edge) {
+        const text = el.textContent.trim();
+        if (text) edge = edges.find(e => e.label === text);
+      }
+      if (!edge) return false;
+      activeEdge = { src: edge.src, tgt: edge.tgt, idx: edge.idx };
+      document.getElementById('inspectorEdgeId').value = edgeKey(edge);
+      document.getElementById('inspectorEdgeLabel').value = edge.label;
+      document.getElementById('inspectorEdgeStyle').value = edge.style;
+      document.getElementById('inspectorEdgeArrow').value = edge.arrow;
+      refreshEdgeInspectorState();
+      switchInspectorTab('edge');
+      inspectorDrawer.classList.remove('hidden');
+      return true;
+    }
+
+    function refreshEdgeInspectorState(note) {
+      const invisible = document.getElementById('inspectorEdgeStyle').value === 'invisible';
+      document.getElementById('inspectorEdgeLabel').disabled = invisible;
+      document.getElementById('inspectorEdgeArrow').disabled = invisible;
+      const noteEl = document.getElementById('inspectorEdgeNote');
+      const msg = note || (invisible ? 'Invisible spacers (~~~) do not support labels or arrowheads.' : '');
+      noteEl.textContent = msg; noteEl.classList.toggle('hidden', !msg);
+    }
+
+    function updateActiveEdgeFromInspector() {
+      if (!activeEdge) return;
+      refreshEdgeInspectorState();
+      const code = mermaidCodeInput.value;
+      const edge = parseMermaidEdges(code).find(e => e.src === activeEdge.src && e.tgt === activeEdge.tgt && e.idx === activeEdge.idx);
+      if (!edge) { refreshEdgeInspectorState('This connection was not found in the Mermaid code.'); return; }
+      const label = document.getElementById('inspectorEdgeLabel').value;
+      const style = document.getElementById('inspectorEdgeStyle').value;
+      const arrow = document.getElementById('inspectorEdgeArrow').value;
+      const next = code.slice(0, edge.start) + buildMermaidConnector(style, arrow, label) + code.slice(edge.end);
+      projectState.edges = projectState.edges || {};
+      projectState.edges[edgeKey(edge)] = { source: edge.src, target: edge.tgt, label: label.trim(), style, arrow };
+      if (next !== code) {
+        mermaidCodeInput.value = projectState.mermaid = next;
         updateLineNumbers();
         debouncedRender();
       }
