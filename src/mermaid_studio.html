@@ -25,7 +25,8 @@
       pointer-events: all !important;
     }
     /* Invisible padded stroke (added by addEdgeHitPaths) so thin lines are easy to click */
-    #mermaidRender path.edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; }
+    #mermaidRender .edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; stroke-dasharray: none !important; cursor: pointer; pointer-events: stroke; }
+    #mermaidRender .actor, #mermaidRender .actor-man, #mermaidRender .messageText, #mermaidRender g.cluster { cursor: pointer; pointer-events: all; }
   </style>
 </head>
 <body class="h-full flex flex-col text-slate-100 overflow-hidden font-sans">
@@ -315,9 +316,16 @@
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-blue-950/20'));
       dropZone.addEventListener('drop', handleFileDrop);
       mermaidRender.addEventListener('click', (e) => {
+        const msgEl = e.target.closest('g.messageLine0, g.messageLine1, path.messageLine0, path.messageLine1, .messageLine0, .messageLine1, .messageText, g[class*="message"], .edge-hit[data-msg-index]');
+        if (msgEl && openSequenceMessageInspector(msgEl)) return;
         const edgeEl = e.target.closest('.edgePath, .edgeLabel, g.edgePaths path, g.edgeLabels');
         if (edgeEl && openEdgeInspectorFromElement(edgeEl)) return;
-        const targetEl = e.target.closest('.node, g.nodes > g, .actor, .actor-box, .role, .stateGroup');
+        const actorEl = e.target.closest('.actor, g.actor, text.actor, svg path[class*="actor"], g.actor-man, line[id^="actor"]');
+        if (actorEl) {
+          const actorId = resolveSequenceActorId(actorEl);
+          if (actorId) { openInspector(actorId); return; }
+        }
+        const targetEl = e.target.closest('.node, g.nodes > g, .role, .stateGroup, g.cluster');
         if (targetEl) {
           let nodeId = (targetEl.id || '').replace(/^(flowchart|actor|state)-/, '').replace(/-\d+$/, '');
           if (!nodeId) nodeId = targetEl.getAttribute('name') || targetEl.querySelector('text, tspan')?.textContent?.trim() || '';
@@ -394,15 +402,21 @@
       activeNodeId = nodeId; document.getElementById('inspectorNodeId').value = nodeId;
       if (!projectState.metrics[nodeId]) { projectState.metrics[nodeId] = { title: nodeId, owner: '', ct: 0, co: 0, wip: 0, friction: false }; }
       const m = projectState.metrics[nodeId];
-      const isFlowchart = /^\s*(graph|flowchart)\b/m.test(mermaidCodeInput.value);
+      const code = mermaidCodeInput.value, kind = diagramKind(code);
+      const isFlowchart = kind === 'flow';
       // The diagram code is the source of truth: shape, icon and title are read from one definition.
-      const parsed = isFlowchart ? parseNodeDefinition(mermaidCodeInput.value, nodeId) : null;
+      const parsed = isFlowchart ? parseNodeDefinition(code, nodeId) : null;
+      const sub = isFlowchart && !parsed ? findSubgraph(code, nodeId) : null;
       if (parsed) { m.shape = parsed.shape; m.icon = parsed.icon; m.title = parsed.title || nodeId; }
+      else if (sub) { m.shape = 'rect'; m.icon = ''; m.title = sub.label; }
+      else if (kind === 'sequence') { m.shape = 'rect'; m.icon = ''; m.title = parseSequenceParticipants(code)[nodeId]?.label || nodeId; }
+      else if (kind === 'state' && /^root_(start|end)$/.test(nodeId)) { m.shape = 'rect'; m.icon = ''; m.title = nodeId === 'root_start' ? 'Start [*]' : 'End [*]'; }
       else { m.shape = 'rect'; m.icon = ''; m.title = splitIconLabel(m.title || nodeId).text || nodeId; }
       document.getElementById('inspectorTitle').value = m.title;
       const shapeSel = document.getElementById('inspectorNodeShape'), iconSel = document.getElementById('inspectorNodeIcon');
       shapeSel.value = m.shape; iconSel.value = m.icon;
-      shapeSel.disabled = iconSel.disabled = !isFlowchart;
+      shapeSel.disabled = iconSel.disabled = !isFlowchart || !!sub;
+      ['inspectorOwner', 'inspectorCT', 'inspectorCO', 'inspectorWIP', 'inspectorFriction'].forEach(id => { document.getElementById(id).disabled = kind === 'sequence'; });
       document.getElementById('inspectorOwner').value = m.owner || '';
       document.getElementById('inspectorCT').value = m.ct || 0;
       document.getElementById('inspectorCO').value = m.co || 0;
@@ -442,6 +456,13 @@
     }
 
     function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    function subgraphRegex(id) {
+      return new RegExp('^([ \\t]*subgraph[ \\t]+)' + escapeRegExp(id) + '(?:[ \\t]*\\[(?:"([^"]*)"|([^\\]\\n]*))\\])?[ \\t]*$', 'm');
+    }
+    function findSubgraph(code, id) {
+      const m = code.match(subgraphRegex(id));
+      return m ? { label: (m[2] ?? m[3] ?? id).trim() || id } : null;
+    }
     const SHAPE_MAP = {
       rect:       { open: '[',  close: ']'  },
       rounded:    { open: '(',  close: ')'  },
@@ -471,6 +492,142 @@
         hit.dataset.edgeFor = p.id;
         p.parentNode.insertBefore(hit, p.nextSibling);
       });
+      // Sequence messages are bare <line>/<path> elements, so give each a wide invisible twin.
+      svg.querySelectorAll('.messageLine0, .messageLine1').forEach((el, i) => {
+        const hit = el.cloneNode(false);
+        ['id', 'marker-end', 'marker-start', 'style'].forEach(a => hit.removeAttribute(a));
+        hit.setAttribute('class', 'edge-hit');
+        hit.dataset.msgIndex = i;
+        el.parentNode.insertBefore(hit, el.nextSibling);
+      });
+    }
+
+    function diagramKind(code) {
+      const first = (code.match(/^[ \t]*(?!%%)(\S+)/m) || [])[1] || '';
+      if (/^(graph|flowchart)$/.test(first)) return 'flow';
+      if (first === 'sequenceDiagram') return 'sequence';
+      if (/^stateDiagram/.test(first)) return 'state';
+      return 'other';
+    }
+
+    function parseSequenceParticipants(code) {
+      const map = {};
+      code.split('\n').forEach(l => {
+        const m = l.match(/^\s*(?:participant|actor)\s+(\w+)(?:\s+as\s+(.+?))?\s*$/);
+        if (m) map[m[1]] = { label: (m[2] || m[1]).trim() };
+      });
+      return map;
+    }
+
+    const SEQ_OPS = {
+      '->>': ['solid', 'directed'], '-->>': ['dotted', 'directed'], '->': ['solid', 'open'], '-->': ['dotted', 'open'],
+      '-x': ['solid', 'cross'], '--x': ['dotted', 'cross'], '-)': ['solid', 'circle'], '--)': ['dotted', 'circle']
+    };
+    function buildSequenceOperator(style, arrow) {
+      return (style === 'dotted' ? '--' : '-') + ({ open: '', cross: 'x', circle: ')' }[arrow] ?? '>>');
+    }
+
+    function parseSequenceMessages(code) {
+      const msgs = [], counts = {};
+      let offset = 0;
+      code.split('\n').forEach(raw => {
+        const lineStart = offset; offset += raw.length + 1;
+        const line = raw.replace(/\r$/, '');
+        const m = line.match(/^([ \t]*\w+[ \t]*)(-->>|->>|--x|-x|--\)|-\)|-->|->)([+-]?)[ \t]*(\w+)[ \t]*:(.*)$/);
+        if (!m) return;
+        const [style, arrow] = SEQ_OPS[m[2]];
+        const pair = m[1].trim() + '\0' + m[4];
+        const idx = counts[pair] = (counts[pair] ?? -1) + 1;
+        msgs.push({ kind: 'sequence', ord: msgs.length, src: m[1].trim(), tgt: m[4], act: m[3], idx, label: m[5].trim() === '#nbsp;' ? '' : m[5].trim(), style, arrow, start: lineStart + m[1].length, end: lineStart + line.length });
+      });
+      return msgs;
+    }
+
+    function parseStateTransitions(code) {
+      const trans = [], counts = {};
+      let offset = 0;
+      code.split('\n').forEach(raw => {
+        const lineStart = offset; offset += raw.length + 1;
+        const line = raw.replace(/\r$/, '');
+        const m = line.match(/^([ \t]*(\[\*\]|\w+)[ \t]*-->[ \t]*(\[\*\]|\w+))[ \t]*(?::[ \t]*(.*))?$/);
+        if (!m) return;
+        const src = m[2] === '[*]' ? 'start' : m[2], tgt = m[3] === '[*]' ? 'end' : m[3];
+        const idx = counts[src + '\0' + tgt] = (counts[src + '\0' + tgt] ?? -1) + 1;
+        trans.push({ kind: 'state', ord: trans.length, src, tgt, idx, label: (m[4] || '').trim(), style: 'solid', arrow: 'directed', start: lineStart + m[1].length, end: lineStart + line.length });
+      });
+      return trans;
+    }
+
+    function resolveSequenceActorId(el) {
+      const named = el.closest('[name]');
+      if (named?.getAttribute('name')) return named.getAttribute('name');
+      const labels = [...mermaidRender.querySelectorAll('text.actor')];
+      if (!labels.length) return '';
+      let text;
+      if (el.matches('text.actor')) text = el;
+      else {
+        const r = el.getBoundingClientRect(), cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+        const xOnly = el.tagName === 'line';
+        let best = Infinity;
+        labels.forEach(t => {
+          const b = t.getBoundingClientRect();
+          const d = (b.x + b.width / 2 - cx) ** 2 + (xOnly ? 0 : (b.y + b.height / 2 - cy) ** 2);
+          if (d < best) { best = d; text = t; }
+        });
+      }
+      const label = text.textContent.replace(/\s+/g, ' ').trim();
+      const parts = parseSequenceParticipants(mermaidCodeInput.value);
+      return Object.keys(parts).find(id => parts[id].label === label) || label;
+    }
+
+    function openSequenceMessageInspector(el) {
+      const msgs = parseSequenceMessages(mermaidCodeInput.value);
+      const all = sel => [...mermaidRender.querySelectorAll(sel)];
+      let ord = -1;
+      const hit = el.closest('.edge-hit[data-msg-index]');
+      const text = el.closest('text.messageText');
+      const line = el.closest('.messageLine0, .messageLine1');
+      if (hit) ord = Number(hit.dataset.msgIndex);
+      else if (text) ord = all('text.messageText').indexOf(text);
+      else if (line) ord = all('.messageLine0, .messageLine1').indexOf(line);
+      else {
+        const inner = el.querySelector('.messageLine0, .messageLine1');
+        if (inner) ord = all('.messageLine0, .messageLine1').indexOf(inner);
+      }
+      return !!msgs[ord] && showEdgeInspector(msgs[ord]);
+    }
+
+    function openStateTransitionFromElement(el) {
+      const trans = parseStateTransitions(mermaidCodeInput.value);
+      const labelG = el.closest('g.edgeLabel');
+      let ord = -1;
+      if (labelG) ord = [...mermaidRender.querySelectorAll('g.edgeLabels > g.edgeLabel')].indexOf(labelG);
+      else {
+        let p = el.closest('path');
+        if (p?.dataset.edgeFor) p = mermaidRender.querySelector(`[id="${p.dataset.edgeFor}"]`);
+        if (p) ord = [...mermaidRender.querySelectorAll('g.edgePaths > path:not(.edge-hit)')].indexOf(p);
+      }
+      return !!trans[ord] && showEdgeInspector(trans[ord]);
+    }
+
+    function showEdgeInspector(edge) {
+      activeEdge = { kind: edge.kind || 'flow', src: edge.src, tgt: edge.tgt, idx: edge.idx, ord: edge.ord };
+      document.getElementById('inspectorEdgeId').value = edgeKey(edge);
+      document.getElementById('inspectorEdgeLabel').value = edge.label;
+      const styleSel = document.getElementById('inspectorEdgeStyle'), arrowSel = document.getElementById('inspectorEdgeArrow');
+      const allowed = {
+        flow: null,
+        sequence: { style: ['solid', 'dotted'], arrow: ['directed', 'open', 'cross', 'circle'] },
+        state: { style: ['solid'], arrow: ['directed'] }
+      }[activeEdge.kind];
+      [[styleSel, 'style'], [arrowSel, 'arrow']].forEach(([sel, key]) => {
+        [...sel.options].forEach(o => { o.disabled = !!allowed && !allowed[key].includes(o.value); });
+      });
+      styleSel.value = edge.style; arrowSel.value = edge.arrow;
+      refreshEdgeInspectorState();
+      switchInspectorTab('edge');
+      inspectorDrawer.classList.remove('hidden');
+      return true;
     }
 
     function splitIconLabel(label) {
@@ -552,8 +709,17 @@
 
     function syncNodeToMermaid(nodeId, m) {
       let code = mermaidCodeInput.value;
-      const isFlowchart = /^\s*(graph|flowchart)\b/m.test(code);
-      if (isFlowchart) {
+      const kind = diagramKind(code);
+      const isFlowchart = kind === 'flow';
+      if (kind === 'sequence') {
+        const title = (m.title || '').trim().replace(/\n/g, ' ');
+        const decl = new RegExp('^([ \\t]*(?:participant|actor)[ \\t]+' + escapeRegExp(nodeId) + ')(?:[ \\t]+as[ \\t]+.*)?[ \\t]*$', 'm');
+        if (title) code = code.replace(decl, (all, head) => title === nodeId ? head : `${head} as ${title}`);
+      }
+      if (isFlowchart && !findNodeDefs(code, nodeId).length && findSubgraph(code, nodeId)) {
+        const title = (m.title || '').trim().replace(/"/g, '#quot;');
+        if (title) code = code.replace(subgraphRegex(nodeId), (all, head) => `${head}${nodeId} ["${title}"]`);
+      } else if (isFlowchart) {
         const defs = findNodeDefs(code, nodeId);
         const shape = m.shape || (defs[0] ? defs[0].shape : 'rect');
         const cleanTitleText = (m.title || '').trim() || (defs[0] ? splitIconLabel(defs[0].label).text : '') || nodeId;
@@ -659,6 +825,10 @@
     function edgeKey(e) { return `${e.src}_to_${e.tgt}${e.idx ? '_' + (e.idx + 1) : ''}`; }
 
     function openEdgeInspectorFromElement(el) {
+      const kind = diagramKind(mermaidCodeInput.value);
+      if (kind === 'state') return openStateTransitionFromElement(el);
+      if (kind !== 'flow') return false;
+      if (!el.matches('path')) el = el.closest('g.edgeLabel') || el;
       const edges = parseMermaidEdges(mermaidCodeInput.value);
       if (!edges.length) return false;
       const hitPath = el.matches('path') ? el : el.querySelector('path');
@@ -677,23 +847,18 @@
         if (text) edge = edges.find(e => e.label === text);
       }
       if (!edge) return false;
-      activeEdge = { src: edge.src, tgt: edge.tgt, idx: edge.idx };
-      document.getElementById('inspectorEdgeId').value = edgeKey(edge);
-      document.getElementById('inspectorEdgeLabel').value = edge.label;
-      document.getElementById('inspectorEdgeStyle').value = edge.style;
-      document.getElementById('inspectorEdgeArrow').value = edge.arrow;
-      refreshEdgeInspectorState();
-      switchInspectorTab('edge');
-      inspectorDrawer.classList.remove('hidden');
-      return true;
+      return showEdgeInspector(edge);
     }
 
     function refreshEdgeInspectorState(note) {
+      const kind = activeEdge?.kind;
       const invisible = document.getElementById('inspectorEdgeStyle').value === 'invisible';
       document.getElementById('inspectorEdgeLabel').disabled = invisible;
-      document.getElementById('inspectorEdgeArrow').disabled = invisible;
+      document.getElementById('inspectorEdgeArrow').disabled = invisible || kind === 'state';
+      document.getElementById('inspectorEdgeStyle').disabled = kind === 'state';
+      const kindNote = { sequence: 'Sequence messages support solid/dotted lines with arrow, open, cross or async heads.', state: 'State transitions support label editing only.' }[kind];
       const noteEl = document.getElementById('inspectorEdgeNote');
-      const msg = note || (invisible ? 'Invisible spacers (~~~) do not support labels or arrowheads.' : '');
+      const msg = note || (invisible ? 'Invisible spacers (~~~) do not support labels or arrowheads.' : kindNote || '');
       noteEl.textContent = msg; noteEl.classList.toggle('hidden', !msg);
     }
 
@@ -701,11 +866,22 @@
       if (!activeEdge) return;
       refreshEdgeInspectorState();
       const code = mermaidCodeInput.value;
-      const edge = parseMermaidEdges(code).find(e => e.src === activeEdge.src && e.tgt === activeEdge.tgt && e.idx === activeEdge.idx);
-      if (!edge) { refreshEdgeInspectorState('This connection was not found in the Mermaid code.'); return; }
       const label = document.getElementById('inspectorEdgeLabel').value;
       const style = document.getElementById('inspectorEdgeStyle').value;
       const arrow = document.getElementById('inspectorEdgeArrow').value;
+      if (activeEdge.kind === 'sequence' || activeEdge.kind === 'state') {
+        const isSeq = activeEdge.kind === 'sequence';
+        const edge = (isSeq ? parseSequenceMessages(code) : parseStateTransitions(code)).find(e => e.ord === activeEdge.ord);
+        if (!edge) { refreshEdgeInspectorState('This connection was not found in the Mermaid code.'); return; }
+        const text = label.trim().replace(/\n/g, ' ');
+        // Mermaid rejects a sequence message with no text, so an empty label becomes a blank entity.
+        const repl = isSeq ? `${buildSequenceOperator(style, arrow)}${edge.act || ' '}${edge.tgt}: ${text || '#nbsp;'}` : (text ? ` : ${text}` : '');
+        const next = code.slice(0, edge.start) + repl + code.slice(edge.end);
+        if (next !== code) { mermaidCodeInput.value = projectState.mermaid = next; updateLineNumbers(); debouncedRender(); }
+        return;
+      }
+      const edge = parseMermaidEdges(code).find(e => e.src === activeEdge.src && e.tgt === activeEdge.tgt && e.idx === activeEdge.idx);
+      if (!edge) { refreshEdgeInspectorState('This connection was not found in the Mermaid code.'); return; }
       const next = code.slice(0, edge.start) + buildMermaidConnector(style, arrow, label) + code.slice(edge.end);
       projectState.edges = projectState.edges || {};
       projectState.edges[edgeKey(edge)] = { source: edge.src, target: edge.tgt, label: label.trim(), style, arrow };
