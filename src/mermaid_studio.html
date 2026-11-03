@@ -29,9 +29,18 @@
     <div class="flex items-center space-x-2">
       <select id="templateSelect" class="bg-slate-800 border border-slate-700 text-xs text-slate-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[180px] sm:max-w-[240px] truncate">
         <option value="" selected disabled>Select a template...</option>
-        <option value="rma">RMA Process & Ownership</option>
-        <option value="swimlanes">Department Swimlanes</option>
-        <option value="vsm">Value Stream Process Flow</option>
+        <optgroup label="Lean & Value Stream">
+          <option value="vsm_horizontal">Value Stream Map (LR + WIP)</option>
+          <option value="standard_process">Standard Process Flow (Decision Gates)</option>
+        </optgroup>
+        <optgroup label="Cross-Functional & Handoffs">
+          <option value="swimlanes">Departmental Swimlanes</option>
+          <option value="sequence">Sequence Handoff Diagram</option>
+        </optgroup>
+        <optgroup label="Quality & Lifecycle">
+          <option value="state_lifecycle">State Machine Lifecycle</option>
+          <option value="root_cause">Root Cause Analysis Tree</option>
+        </optgroup>
       </select>
     </div>
     <div class="flex items-center space-x-1.5">
@@ -163,9 +172,53 @@
   </footer>
   <script>
     const TEMPLATES = {
-      rma: `graph TD\n    A["1. Customer Request"] --> B["2. Technical Review"]\n    B --> C{"3. Defect Valid?"}\n    C -- Yes --> D["4. Issue RMA #"]\n    C -- No --> E["5. Reject Claim"]\n    D --> F["6. Quarantine & Test"]\n\n    subgraph CS["Customer Support"]\n        A\n        E\n    end\n    subgraph QA["Quality Assurance"]\n        B\n        C\n        F\n    end\n    subgraph LOG["Logistics / Ops"]\n        D\n    end`,
-      swimlanes: `sequenceDiagram\n    actor C as Customer\n    participant CS as Customer Support\n    participant QA as QA Engineering\n    C->>CS: Submit Return Request\n    CS->>QA: Forward Details`,
-      vsm: `graph LR\n    P1["Receiving / Quarantine"] --> I1[/"WIP: 50 Pcs"\\\\] --> P2["Testing & Inspection"]`
+      vsm_horizontal: {
+        title: "Value Stream Map - Standard Flow",
+        mermaid: `graph LR\n    P1["1. Intake & Triage"] --> I1[/"WIP: 20 Pcs"\\] --> P2["2. Processing & Assembly"] --> I2[/"WIP: 50 Pcs"\\] --> P3["3. Final Quality Inspection"]\n\n    classDef friction fill:#451a03,stroke:#f97316,stroke-width:2px,color:#ffedd5;\n    class P2 friction;`,
+        metrics: {
+          P1: { title: "1. Intake & Triage", owner: "Receiving", ct: 10, co: 5, wip: 0, friction: false },
+          I1: { title: "WIP: 20 Pcs", owner: "Buffer", ct: 0, co: 0, wip: 20, friction: false },
+          P2: { title: "2. Processing & Assembly", owner: "Operations", ct: 45, co: 15, wip: 0, friction: true },
+          I2: { title: "WIP: 50 Pcs", owner: "Buffer", ct: 0, co: 0, wip: 50, friction: false },
+          P3: { title: "3. Final Quality Inspection", owner: "Quality Assurance", ct: 20, co: 5, wip: 0, friction: false }
+        }
+      },
+      standard_process: {
+        title: "Standard Process Flow",
+        mermaid: `graph TD\n    A["1. Process Trigger"] --> B["2. Execution Step"]\n    B --> C{"3. Pass Inspection?"}\n    C -- Yes --> D["4. Complete & Log"]\n    C -- No --> E["5. Rework / Disposition"]\n    E --> B\n\n    classDef friction fill:#451a03,stroke:#f97316,stroke-width:2px,color:#ffedd5;\n    class E friction;`,
+        metrics: {
+          A: { title: "1. Process Trigger", owner: "Operations", ct: 5, co: 0, wip: 0, friction: false },
+          B: { title: "2. Execution Step", owner: "Operations", ct: 25, co: 10, wip: 5, friction: false },
+          C: { title: "3. Pass Inspection?", owner: "Quality Control", ct: 10, co: 0, wip: 0, friction: false },
+          D: { title: "4. Complete & Log", owner: "Logistics", ct: 10, co: 0, wip: 0, friction: false },
+          E: { title: "5. Rework / Disposition", owner: "Quality Control", ct: 30, co: 10, wip: 8, friction: true }
+        }
+      },
+      swimlanes: {
+        title: "Departmental Swimlane Flow",
+        mermaid: `graph TD\n    subgraph Commercial ["Sales & Commercial"]\n        A["Order Creation"]\n    end\n    subgraph Engineering ["Engineering"]\n        B["Design Review"]\n    end\n    subgraph Quality ["Quality Assurance"]\n        C["Validation & Testing"]\n    end\n    subgraph Operations ["Operations & Shipping"]\n        D["Fulfillment & Release"]\n    end\n\n    A --> B --> C --> D`,
+        metrics: {
+          A: { title: "Order Creation", owner: "Sales", ct: 15, co: 0, wip: 3, friction: false },
+          B: { title: "Design Review", owner: "Engineering", ct: 60, co: 30, wip: 10, friction: false },
+          C: { title: "Validation & Testing", owner: "Quality Assurance", ct: 40, co: 15, wip: 5, friction: false },
+          D: { title: "Fulfillment & Release", owner: "Operations", ct: 20, co: 10, wip: 2, friction: false }
+        }
+      },
+      sequence: {
+        title: "Sequence Handoff Diagram",
+        mermaid: `sequenceDiagram\n    actor Client as Customer / Client\n    participant CS as Customer Service\n    participant QA as Quality Engineer\n    participant Ops as Operations Team\n\n    Client->>CS: Request Initiation\n    CS->>QA: Technical Assessment Request\n    QA->>Ops: Authorization & Release\n    Ops-->>Client: Confirmation & Delivery`,
+        metrics: {}
+      },
+      state_lifecycle: {
+        title: "State Machine Lifecycle",
+        mermaid: `stateDiagram-v2\n    [*] --> Draft\n    Draft --> InReview : Submit for Review\n    InReview --> Approved : Quality Verification\n    InReview --> Rejected : Failure / Revision\n    Rejected --> Draft : Re-open Ticket\n    Approved --> Archived : Close Out\n    Archived --> [*]`,
+        metrics: {}
+      },
+      root_cause: {
+        title: "Root Cause / Tree Analysis",
+        mermaid: `graph LR\n    Effect["Primary Failure Mode"] --> Machine["Machine / Hardware"]\n    Effect --> Method["Method / Procedure"]\n    Effect --> Material["Material / Supplier"]\n    \n    Machine --> M1["Out of Calibration"]\n    Method --> Me1["Outdated SOP"]\n    Material --> Ma1["Batch Variance"]`,
+        metrics: {}
+      }
     };
     let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {} };
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null;
@@ -189,17 +242,22 @@
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-blue-950/20'));
       dropZone.addEventListener('drop', handleFileDrop);
       mermaidRender.addEventListener('click', (e) => {
-        const nodeEl = e.target.closest('.node');
-        if (nodeEl) {
-          const rawId = nodeEl.id || '';
-          openInspector(rawId.replace(/^flowchart-/, '').replace(/-\d+$/, ''));
+        const targetEl = e.target.closest('.node, .actor, .actor-box, .role, .stateGroup');
+        if (targetEl) {
+          let nodeId = (targetEl.id || '').replace(/^(flowchart|actor|state)-/, '').replace(/-\d+$/, '');
+          if (!nodeId) nodeId = targetEl.getAttribute('name') || targetEl.querySelector('text, tspan')?.textContent?.trim() || '';
+          if (nodeId) openInspector(nodeId);
         }
       });
       document.getElementById('templateSelect').addEventListener('change', (e) => {
-        if (TEMPLATES[e.target.value]) {
-          mermaidCodeInput.value = TEMPLATES[e.target.value];
-          projectState.mermaid = TEMPLATES[e.target.value];
-          updateLineNumbers(); renderDiagram();
+        const selected = TEMPLATES[e.target.value];
+        if (selected) {
+          projectState.title = selected.title;
+          projectState.mermaid = selected.mermaid;
+          projectState.metrics = JSON.parse(JSON.stringify(selected.metrics || {}));
+          mermaidCodeInput.value = selected.mermaid;
+          closeInspector();
+          updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
         }
       });
       lucide.createIcons();
@@ -242,9 +300,11 @@
         dismissError(); updateStatus('Rendered', 'emerald');
         const svgElement = mermaidRender.querySelector('svg');
         if (svgElement) {
-          svgElement.style.width = '100%'; svgElement.style.height = '100%';
+          svgElement.removeAttribute('style');
+          svgElement.style.width = '100%'; svgElement.style.height = '100%'; svgElement.style.overflow = 'visible';
+          svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
           if (panZoomInstance) panZoomInstance.destroy();
-          panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8 });
+          panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
           if (pan && zoom) { panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
         }
         const nodes = (code.match(/\[.*?\]|\(.*?\)|/g) || []).length;
