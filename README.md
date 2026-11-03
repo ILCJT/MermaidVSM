@@ -40,6 +40,10 @@ $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content proje
 
 Browsers and servers limit URL length, so this suits small to medium projects. Use the Open button for large files.
 
+## Mobile
+
+Below 768px the code editor starts collapsed (reopen with its chevron), the inspector docks as a bottom sheet, inspector controls have 44px touch targets, and floating bottom panels respect `env(safe-area-inset-bottom)` (`viewport-fit=cover`). Reload after resizing across the breakpoint to reset the editor state.
+
 ## Documentation
 
 See [`docs/`](docs): project charter, architecture spec, decision log, current state and the `.vsm.json` builder skill.
