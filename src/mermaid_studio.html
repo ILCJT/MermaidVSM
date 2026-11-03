@@ -1018,7 +1018,7 @@
     }
 
     function splitIconLabel(label) {
-      const raw = label || '';
+      const raw = (label || '').replace(/<br\s*\/?>\s*<span[^>]*text-\[10px\][^>]*>[\s\S]*?<\/span>\s*$/i, '');
       // Icon above title: <span ...>EMOJI</span><br/>Title. Legacy form: "EMOJI Title".
       // Current form: <span class='relative…'><span class='absolute…'>EMOJI</span>Title</span>.
       const badge = raw.match(/^\s*<span[^>]*\brelative\b[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>([\s\S]*?)<\/span>\s*$/i);
@@ -1113,7 +1113,15 @@
         const shape = m.shape || (defs[0] ? defs[0].shape : 'rect');
         const cleanTitleText = (m.title || '').trim() || (defs[0] ? splitIconLabel(defs[0].label).text : '') || nodeId;
         const safeTitle = cleanTitleText.replace(/"/g, '#quot;');
-        const fullLabel = m.icon && ICONS[m.icon] ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10'>${ICONS[m.icon]}</span>${safeTitle}</span>` : safeTitle;
+        const fullTitle = m.icon && ICONS[m.icon] ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10'>${ICONS[m.icon]}</span>${safeTitle}</span>` : safeTitle;
+        const parts = [];
+        const owner = (m.owner || '').trim().replace(/"/g, '#quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        if (owner) parts.push(`👤 ${owner}`);
+        if (m.ct > 0) parts.push(`⏱️ ${m.ct}m`);
+        if (m.co > 0) parts.push(`🔄 ${m.co}m`);
+        if (m.wip > 0) parts.push(`📦 ${m.wip}pcs`);
+        const metricsPill = parts.length ? `<br/><span class='block text-[10px] opacity-80 font-mono leading-tight mt-1'>${parts.join(' | ')}</span>` : '';
+        const fullLabel = fullTitle + metricsPill;
         // Atomic definition: ID + brackets + label are replaced together in one pass.
         const define = (tokens) => `${nodeId}${tokens.open}"${fullLabel}"${tokens.close}`;
         if (defs.length) {
@@ -1122,25 +1130,29 @@
             const tokens = SHAPE_MAP[shape] || { open: d.open, close: d.close };
             code = code.slice(0, d.start) + define(tokens) + code.slice(d.end);
           }
-        } else if (SHAPE_MAP[shape] && (shape !== 'rect' || m.icon || cleanTitleText !== nodeId)) {
+        } else if (SHAPE_MAP[shape] && (shape !== 'rect' || m.icon || metricsPill || cleanTitleText !== nodeId)) {
           const at = findBareNodeEnd(code, nodeId);
           if (at >= 0) code = code.slice(0, at - nodeId.length) + define(SHAPE_MAP[shape]) + code.slice(at);
         }
       }
-      if (isFlowchart) {
-        const classLine = new RegExp('^[ \\t]*class[ \\t]+' + escapeRegExp(nodeId) + '[ \\t]+friction;?[ \\t]*$\\n?', 'gm');
-        const hasClass = new RegExp('^[ \\t]*class[ \\t]+' + escapeRegExp(nodeId) + '[ \\t]+friction;?[ \\t]*$', 'm').test(code);
+      if ((isFlowchart || kind === 'state') && !/^root_(start|end)$/.test(nodeId)) {
+        const FR_LINE = /^([ \t]*class[ \t]+)([^\s;]+)([ \t]+friction)[ \t]*;?[ \t]*$/;
+        const lines = code.split('\n');
+        const hasClass = lines.some(l => { const c = l.match(FR_LINE); return c && c[2].split(',').includes(nodeId); });
         if (m.friction && !hasClass) {
-          if (!/^[ \t]*classDef[ \t]+friction\b/m.test(code)) {
-            code = code.replace(/\s*$/, '\n') + '    classDef friction fill:#7f1d1d,stroke:#f43f5e,stroke-width:2px,color:#fecdd3;\n';
-          }
-          code = code.replace(/\s*$/, '\n') + `    class ${nodeId} friction;\n`;
+          code = code.replace(/\s*$/, '\n') + `    class ${nodeId} friction${kind === 'state' ? '' : ';'}\n`;
         } else if (!m.friction && hasClass) {
-          code = code.replace(classLine, '');
-          if (!/^[ \t]*class[ \t]+[^\n]*\bfriction;?[ \t]*$/m.test(code)) {
-            code = code.replace(/^[ \t]*classDef[ \t]+friction\b.*$\n?/gm, '');
-          }
+          code = lines.flatMap(l => {
+            const c = l.match(FR_LINE);
+            if (!c || !c[2].split(',').includes(nodeId)) return [l];
+            const rest = c[2].split(',').filter(i => i !== nodeId);
+            return rest.length ? [`${c[1]}${rest.join(',')}${c[3]}${kind === 'state' ? '' : ';'}`] : [];
+          }).join('\n');
         }
+        const anyClass = code.split('\n').some(l => FR_LINE.test(l));
+        const hasDef = /^[ \t]*classDef[ \t]+friction\b/m.test(code);
+        if (anyClass && !hasDef) code = code.replace(/\s*$/, '\n') + '    classDef friction fill:#451a03,stroke:#f97316,stroke-width:2px,color:#ffedd5;\n';
+        else if (!anyClass && hasDef) code = code.replace(/^[ \t]*classDef[ \t]+friction\b.*$\n?/gm, '');
       }
       if (code !== mermaidCodeInput.value) {
         mermaidCodeInput.value = projectState.mermaid = code;
