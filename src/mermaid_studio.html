@@ -368,7 +368,30 @@
       });
       lucide.createIcons();
       calculateVSMMetrics();
+      loadStateFromURL();
     });
+
+    // Hydrates the workspace from ?state=<base64 or base64url of a .vsm.json> (or #state=...).
+    function loadStateFromURL() {
+      const params = new URLSearchParams(location.search || '');
+      const hashParams = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+      const encoded = params.get('state') || hashParams.get('state');
+      if (!encoded) return;
+      try {
+        const b64 = encoded.trim().replace(/ /g, '+').replace(/-/g, '+').replace(/_/g, '/');
+        const bytes = Uint8Array.from(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
+        const parsed = JSON.parse(new TextDecoder().decode(bytes));
+        if (!parsed || typeof parsed.mermaid !== 'string' || !parsed.mermaid.trim()) throw new Error('State has no "mermaid" field.');
+        projectState = parsed;
+        projectState.metrics = projectState.metrics || {};
+        if (parsed.project?.title) projectState.title = parsed.project.title;
+        mermaidCodeInput.value = parsed.mermaid;
+        updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
+      } catch (err) {
+        updateStatus('Could not load ?state= parameter', 'rose');
+        console.warn('Invalid state URL parameter:', err);
+      }
+    }
 
     function calculateVSMMetrics() {
       let totalVA = 0, totalCO = 0, totalWIP = 0, frictionCount = 0;
