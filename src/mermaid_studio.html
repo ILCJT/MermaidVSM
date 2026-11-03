@@ -136,6 +136,20 @@
           </div>
         </div>
       </aside>
+      <div id="vsmSummaryLadder" class="absolute bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 p-2.5 backdrop-blur-md z-20">
+        <div class="flex items-center justify-between text-xs font-medium">
+          <div class="flex items-center space-x-4">
+            <span class="text-slate-300">VA Time: <strong id="summaryVATime" class="text-slate-100 font-mono">0m</strong></span>
+            <span class="text-slate-300">Lead Time (PLT): <strong id="summaryPLT" class="text-slate-100 font-mono">0m</strong></span>
+            <span class="text-slate-300">Total WIP: <strong id="summaryWIP" class="text-slate-100 font-mono">0 pcs</strong></span>
+            <span class="text-slate-300">Friction Points: <strong id="summaryFriction" class="text-slate-100 font-mono">0</strong></span>
+          </div>
+          <div>
+            <span class="text-slate-400 text-[11px]">Efficiency:</span>
+            <span id="summaryEfficiency" class="px-2 py-0.5 rounded text-xs font-mono font-bold bg-blue-900/50 text-blue-300 border border-blue-700/50">0.0%</span>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
   <footer class="bg-slate-900 border-t border-slate-800 px-3 py-1 flex items-center justify-between text-[11px] text-slate-400 shrink-0 z-20">
@@ -188,7 +202,25 @@
         }
       });
       lucide.createIcons();
+      calculateVSMMetrics();
     });
+
+    function calculateVSMMetrics() {
+      let totalVA = 0, totalCO = 0, totalWIP = 0, frictionCount = 0;
+      Object.values(projectState.metrics || {}).forEach(m => {
+        totalVA += Number(m.ct) || 0;
+        totalCO += Number(m.co) || 0;
+        totalWIP += Number(m.wip) || 0;
+        if (m.friction) frictionCount++;
+      });
+      const totalPLT = totalVA + totalCO;
+      const efficiency = totalPLT > 0 ? (totalVA / totalPLT) * 100 : 0;
+      document.getElementById('summaryVATime').textContent = `${totalVA}m`;
+      document.getElementById('summaryPLT').textContent = `${totalPLT}m`;
+      document.getElementById('summaryWIP').textContent = `${totalWIP} pcs`;
+      document.getElementById('summaryFriction').textContent = frictionCount;
+      document.getElementById('summaryEfficiency').textContent = `${efficiency.toFixed(1)}%`;
+    }
 
     function debouncedRender() { clearTimeout(renderTimeout); renderTimeout = setTimeout(renderDiagram, 200); }
     async function renderDiagram() {
@@ -239,6 +271,7 @@
         wip: parseFloat(document.getElementById('inspectorWIP').value) || 0,
         friction: document.getElementById('inspectorFriction').checked
       };
+      calculateVSMMetrics();
     }
 
     function handleFileDrop(e) { e.preventDefault(); document.getElementById('dropZone').classList.remove('bg-blue-950/20'); if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]); }
@@ -250,10 +283,14 @@
         if (file.name.endsWith('.json')) {
           try {
             const parsed = JSON.parse(content);
-            if (parsed.mermaid) { projectState = parsed; mermaidCodeInput.value = parsed.mermaid; }
+            if (parsed.mermaid) {
+              projectState = parsed;
+              if (parsed.project?.title) projectState.title = parsed.project.title;
+              mermaidCodeInput.value = parsed.mermaid;
+            }
           } catch(err) { alert('Invalid project JSON file.'); }
         } else { projectState.mermaid = content; mermaidCodeInput.value = content; }
-        updateLineNumbers(); renderDiagram();
+        updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
       };
       reader.readAsText(file);
     }
@@ -263,7 +300,8 @@
       const jsonStr = JSON.stringify(projectState, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = `${projectState.title.toLowerCase().replace(/\s+/g, '_')}.vsm.json`; a.click();
+      const title = projectState.project?.title || projectState.title || "vsm_project";
+      a.download = `${title.toLowerCase().replace(/\s+/g, '_')}.vsm.json`; a.click();
     }
 
     function updateLineNumbers() { lineNumbers.innerHTML = Array.from({ length: mermaidCodeInput.value.split('\n').length }, (_, i) => i + 1).join('<br>'); }
@@ -284,7 +322,7 @@
     function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
     function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
     function resetZoom() { if (panZoomInstance) { panZoomInstance.resetZoom(); panZoomInstance.fit(); panZoomInstance.center(); } }
-    function clearCode() { mermaidCodeInput.value = ''; updateLineNumbers(); renderDiagram(); }
+    function clearCode() { mermaidCodeInput.value = ''; updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
     function formatCode() { mermaidCodeInput.value = mermaidCodeInput.value.split('\n').map(l => l.trimEnd()).join('\n'); updateLineNumbers(); }
     function exportSVG() {
       const svg = mermaidRender.querySelector('svg');
