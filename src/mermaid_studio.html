@@ -27,6 +27,11 @@
     /* Invisible padded stroke (added by addEdgeHitPaths) so thin lines are easy to click */
     #mermaidRender .edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; stroke-dasharray: none !important; cursor: pointer; pointer-events: stroke; }
     #mermaidRender { user-select: none; touch-action: none; }
+    #mermaidRender .node foreignObject, #mermaidRender .node foreignObject div { overflow: visible !important; }
+    @keyframes connectPulse { 0%, 100% { stroke-opacity: 1; stroke-width: 3px; } 50% { stroke-opacity: 0.35; stroke-width: 5px; } }
+    #mermaidRender .connect-source rect, #mermaidRender .connect-source path, #mermaidRender .connect-source polygon,
+    #mermaidRender .connect-source circle, #mermaidRender .connect-source ellipse { stroke: #22c55e !important; animation: connectPulse 1s ease-in-out infinite; }
+    #mermaidRender.connect-armed .node { cursor: crosshair !important; }
     #mermaidRender .actor, #mermaidRender .actor-man, #mermaidRender .messageText, #mermaidRender g.cluster { cursor: pointer; pointer-events: all; }
   </style>
 </head>
@@ -110,6 +115,7 @@
         <button onclick="addLibraryNode('process')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Process Box</button>
         <button onclick="addLibraryNode('decision')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Decision Gate</button>
         <button onclick="addLibraryNode('buffer')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Buffer/WIP</button>
+        <button id="btnConnectNodes" onclick="toggleConnectMode()" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">🔗 Connect Nodes</button>
         <button onclick="deleteSelected()" class="text-left px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/60 rounded-md text-xs text-rose-200 transition">🗑️ Delete Selected</button>
       </div>
       <div class="absolute bottom-16 right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
@@ -326,6 +332,11 @@
       mermaidRender.addEventListener('pointerdown', startNodeDrag);
       mermaidRender.addEventListener('click', (e) => {
         if (dragMoved) { dragMoved = false; return; }
+        if (connectArmed) {
+          const nodeEl = e.target.closest('.node, g.nodes > g');
+          if (nodeEl) handleConnectClick(nodeEl);
+          return;
+        }
         const msgEl = e.target.closest('g.messageLine0, g.messageLine1, path.messageLine0, path.messageLine1, .messageLine0, .messageLine1, .messageText, g[class*="message"], .edge-hit[data-msg-index]');
         if (msgEl && openSequenceMessageInspector(msgEl)) return;
         const edgeEl = e.target.closest('.edgePath, .edgeLabel, g.edgePaths path, g.edgeLabels');
@@ -402,6 +413,10 @@
           addEdgeHitPaths(svgElement);
           injectGooeyFilter(svgElement);
           buildDiagramIndex(svgElement);
+          if (connectSourceNodeId) {
+            const src = [...svgElement.querySelectorAll('g.node')].find(n => n.id.replace(/^flowchart-/, '').replace(/-\d+$/, '') === connectSourceNodeId);
+            if (src) src.classList.add('connect-source'); else disarmConnectMode();
+          }
           applyStoredPositions();
           panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
           if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
@@ -749,6 +764,53 @@
       inspectorDrawer.classList.remove('hidden');
     }
 
+    // ---- Connect Nodes tool ----
+    let connectArmed = false, connectSourceNodeId = null;
+
+    function setConnectButton(text, active) {
+      const btn = document.getElementById('btnConnectNodes');
+      btn.textContent = text;
+      btn.classList.toggle('bg-emerald-700', active); btn.classList.toggle('hover:bg-emerald-600', active);
+      btn.classList.toggle('border-emerald-500', active); btn.classList.toggle('text-white', active);
+      btn.classList.toggle('bg-slate-800', !active); btn.classList.toggle('hover:bg-slate-700', !active);
+      btn.classList.toggle('border-slate-700', !active); btn.classList.toggle('text-slate-200', !active);
+    }
+
+    function disarmConnectMode() {
+      connectArmed = false; connectSourceNodeId = null;
+      mermaidRender.classList.remove('connect-armed');
+      mermaidRender.querySelectorAll('.connect-source').forEach(n => n.classList.remove('connect-source'));
+      setConnectButton('🔗 Connect Nodes', false);
+    }
+
+    function toggleConnectMode() {
+      if (connectArmed) { disarmConnectMode(); updateStatus('Connect mode cancelled', 'emerald'); return; }
+      if (diagramKind(mermaidCodeInput.value) !== 'flow') { updateStatus('Connect Nodes works on flowcharts only', 'amber'); return; }
+      connectArmed = true; connectSourceNodeId = null;
+      mermaidRender.classList.add('connect-armed');
+      setConnectButton('Select Source...', true);
+      updateStatus('Connect mode: click the source node', 'emerald');
+    }
+
+    function handleConnectClick(nodeEl) {
+      const nodeId = (nodeEl.id || '').replace(/^flowchart-/, '').replace(/-\d+$/, '');
+      if (!nodeId) return;
+      if (connectSourceNodeId === null) {
+        connectSourceNodeId = nodeId;
+        nodeEl.classList.add('connect-source');
+        setConnectButton('Select Target...', true);
+        updateStatus(`Source ${nodeId} selected: click the target node`, 'emerald');
+        return;
+      }
+      const src = connectSourceNodeId;
+      disarmConnectMode();
+      const next = mermaidCodeInput.value.replace(/\s+$/, '') + `\n    ${src} --> ${nodeId}`;
+      mermaidCodeInput.value = projectState.mermaid = next;
+      updateLineNumbers(); debouncedRender();
+      const edge = parseMermaidEdges(next).filter(e => e.src === src && e.tgt === nodeId).pop();
+      if (edge) showEdgeInspector(edge);
+    }
+
     function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; activeEdge = null; }
 
     function switchInspectorTab(tab) {
@@ -958,7 +1020,9 @@
     function splitIconLabel(label) {
       const raw = label || '';
       // Icon above title: <span ...>EMOJI</span><br/>Title. Legacy form: "EMOJI Title".
-      const html = raw.match(/^\s*<span[^>]*>([\s\S]*?)<\/span>\s*<br\s*\/?>\s*([\s\S]*)$/i);
+      // Current form: <span class='relative…'><span class='absolute…'>EMOJI</span>Title</span>.
+      const badge = raw.match(/^\s*<span[^>]*\brelative\b[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>([\s\S]*?)<\/span>\s*$/i);
+      const html = badge || raw.match(/^\s*<span[^>]*>([\s\S]*?)<\/span>\s*<br\s*\/?>\s*([\s\S]*)$/i);
       const iconPart = html ? html[1] : raw, titlePart = html ? html[2] : null;
       const plain = stripVS(iconPart).trim();
       for (const [key, emoji] of Object.entries(ICONS)) {
@@ -1049,7 +1113,7 @@
         const shape = m.shape || (defs[0] ? defs[0].shape : 'rect');
         const cleanTitleText = (m.title || '').trim() || (defs[0] ? splitIconLabel(defs[0].label).text : '') || nodeId;
         const safeTitle = cleanTitleText.replace(/"/g, '#quot;');
-        const fullLabel = m.icon && ICONS[m.icon] ? `<span class='block text-sm mb-0.5'>${ICONS[m.icon]}</span><br/>${safeTitle}` : safeTitle;
+        const fullLabel = m.icon && ICONS[m.icon] ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10'>${ICONS[m.icon]}</span>${safeTitle}</span>` : safeTitle;
         // Atomic definition: ID + brackets + label are replaced together in one pass.
         const define = (tokens) => `${nodeId}${tokens.open}"${fullLabel}"${tokens.close}`;
         if (defs.length) {
