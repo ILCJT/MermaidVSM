@@ -196,15 +196,16 @@
             <div>
               <label class="block text-[11px] font-semibold text-slate-400 mb-1">Attach Icon</label>
               <select id="inspectorNodeIcon" onchange="updateActiveNodeFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-blue-500 disabled:opacity-50">
-                <option value="">No Icon</option>
-                <option value="user">User / Actor (👤)</option>
-                <option value="alert">Alert / Bottleneck (⚠️)</option>
-                <option value="box">Package / Inventory (📦)</option>
-                <option value="check">Checkmark / Pass (✅)</option>
-                <option value="clock">Timer / Delay (⏱️)</option>
-                <option value="truck">Transit / Delivery (🚚)</option>
-                <option value="db">Database / Server (💾)</option>
-                <option value="gear">Settings / Process (⚙️)</option>
+                <option value="">No Process Icon</option>
+                <option value="process_dedicated">Dedicated Process (🏭)</option>
+                <option value="process_shared">Shared Process (🔀)</option>
+                <option value="workcell">Workcell (🧩)</option>
+                <option value="supplier">External Supplier (🏭)</option>
+                <option value="customer">Customer / Recipient (👑)</option>
+                <option value="kaizen">Kaizen Burst (💥)</option>
+                <option value="milk_run">Milk Run / Transport (🚚)</option>
+                <option value="supermarket">Supermarket / Storage (🏬)</option>
+                <option value="inspection">Go-See / Quality Inspection (🔍)</option>
               </select>
             </div>
           </div>
@@ -867,7 +868,7 @@
       ...Object.entries(SHAPE_MAP).map(([shape, t]) => [shape, t.open, t.close]),
       ...CUSTOM_SHAPES.map(([open, close]) => ['custom', open, close])
     ].sort((a, b) => b[1].length - a[1].length);
-    const ICONS = { user: '👤', alert: '⚠️', box: '📦', check: '✅', clock: '⏱️', truck: '🚚', db: '💾', gear: '⚙️' };
+    const ICONS = { process_dedicated: '🏭', process_shared: '🔀', workcell: '🧩', supplier: '🏭', customer: '👑', kaizen: '💥', milk_run: '🚚', supermarket: '🏬', inspection: '🔍' };
     const stripVS = s => s.replace(/\uFE0F/g, '');
 
     function addEdgeHitPaths(svg) {
@@ -1021,8 +1022,15 @@
       const raw = (label || '').replace(/<br\s*\/?>\s*<span[^>]*text-\[10px\][^>]*>[\s\S]*?<\/span>\s*$/i, '');
       // Icon above title: <span ...>EMOJI</span><br/>Title. Legacy form: "EMOJI Title".
       // Current form: <span class='relative…'><span class='absolute…'>EMOJI</span>Title</span>.
-      const badge = raw.match(/^\s*<span[^>]*\brelative\b[^>]*>\s*<span[^>]*>([\s\S]*?)<\/span>([\s\S]*?)<\/span>\s*$/i);
-      const html = badge || raw.match(/^\s*<span[^>]*>([\s\S]*?)<\/span>\s*<br\s*\/?>\s*([\s\S]*)$/i);
+      const badge = raw.match(/^\s*<span[^>]*\brelative\b[^>]*>\s*<span([^>]*)>([\s\S]*?)<\/span>([\s\S]*?)<\/span>\s*$/i);
+      if (badge) {
+        // data-icon disambiguates icons that share an emoji (e.g. Dedicated Process vs External Supplier).
+        const key = (badge[1].match(/data-icon=['"]([\w]+)['"]/) || [])[1];
+        const plainBadge = stripVS(badge[2]).trim();
+        const found = ICONS[key] && stripVS(ICONS[key]) === plainBadge ? key : Object.keys(ICONS).find(k => stripVS(ICONS[k]) === plainBadge) || '';
+        return { icon: found, text: badge[3].trim() };
+      }
+      const html = raw.match(/^\s*<span[^>]*>([\s\S]*?)<\/span>\s*<br\s*\/?>\s*([\s\S]*)$/i);
       const iconPart = html ? html[1] : raw, titlePart = html ? html[2] : null;
       const plain = stripVS(iconPart).trim();
       for (const [key, emoji] of Object.entries(ICONS)) {
@@ -1113,7 +1121,7 @@
         const shape = m.shape || (defs[0] ? defs[0].shape : 'rect');
         const cleanTitleText = (m.title || '').trim() || (defs[0] ? splitIconLabel(defs[0].label).text : '') || nodeId;
         const safeTitle = cleanTitleText.replace(/"/g, '#quot;');
-        const fullTitle = m.icon && ICONS[m.icon] ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10'>${ICONS[m.icon]}</span>${safeTitle}</span>` : safeTitle;
+        const fullTitle = m.icon && ICONS[m.icon] ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10' data-icon='${m.icon}'>${ICONS[m.icon]}</span>${safeTitle}</span>` : safeTitle;
         const parts = [];
         const owner = (m.owner || '').trim().replace(/"/g, '#quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         if (owner) parts.push(`👤 ${owner}`);
