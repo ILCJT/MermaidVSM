@@ -26,6 +26,7 @@
     }
     /* Invisible padded stroke (added by addEdgeHitPaths) so thin lines are easy to click */
     #mermaidRender .edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; stroke-dasharray: none !important; cursor: pointer; pointer-events: stroke; }
+    #mermaidRender { user-select: none; touch-action: none; }
     #mermaidRender .actor, #mermaidRender .actor-man, #mermaidRender .messageText, #mermaidRender g.cluster { cursor: pointer; pointer-events: all; }
   </style>
 </head>
@@ -92,7 +93,7 @@
       </div>
     </section>
     <section id="previewPanel" class="w-full h-full bg-slate-950 bg-grid-pattern relative flex flex-col flex-1 overflow-hidden">
-      <div id="errorBanner" class="hidden absolute top-3 left-3 right-3 bg-rose-950/90 border border-rose-600/80 text-rose-200 p-3 rounded-lg shadow-xl z-30 max-h-40 overflow-auto backdrop-blur-sm transition-all">
+      <div id="errorBanner" class="hidden absolute top-3 left-3 right-3 bg-rose-950/90 border border-rose-600/80 text-rose-200 p-3 rounded-lg shadow-xl z-40 max-h-40 overflow-auto backdrop-blur-sm transition-all">
         <div class="flex items-start justify-between">
           <div class="flex items-start space-x-2">
             <i data-lucide="alert-triangle" class="w-5 h-5 text-rose-400 shrink-0 mt-0.5"></i>
@@ -103,6 +104,13 @@
           </div>
           <button onclick="dismissError()" class="text-rose-400 hover:text-rose-200 p-0.5"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
+      </div>
+      <div id="objectLibrary" class="absolute top-3 left-3 w-44 bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 backdrop-blur-md p-2 flex flex-col gap-1.5">
+        <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Object Library</div>
+        <button onclick="addLibraryNode('process')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Process Box</button>
+        <button onclick="addLibraryNode('decision')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Decision Gate</button>
+        <button onclick="addLibraryNode('buffer')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Buffer/WIP</button>
+        <button onclick="deleteSelected()" class="text-left px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/60 rounded-md text-xs text-rose-200 transition">🗑️ Delete Selected</button>
       </div>
       <div class="absolute bottom-16 right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
         <button onclick="zoomIn()" class="p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition" title="Zoom In"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
@@ -315,7 +323,9 @@
       dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-blue-950/20'); });
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-blue-950/20'));
       dropZone.addEventListener('drop', handleFileDrop);
+      mermaidRender.addEventListener('pointerdown', startNodeDrag);
       mermaidRender.addEventListener('click', (e) => {
+        if (dragMoved) { dragMoved = false; return; }
         const msgEl = e.target.closest('g.messageLine0, g.messageLine1, path.messageLine0, path.messageLine1, .messageLine0, .messageLine1, .messageText, g[class*="message"], .edge-hit[data-msg-index]');
         if (msgEl && openSequenceMessageInspector(msgEl)) return;
         const edgeEl = e.target.closest('.edgePath, .edgeLabel, g.edgePaths path, g.edgeLabels');
@@ -370,6 +380,7 @@
       const code = mermaidCodeInput.value.trim();
       if (!code) {
         if (panZoomInstance) { panZoomInstance.destroy(); panZoomInstance = null; }
+        nodeIndex = {}; edgeIndex = [];
         mermaidRender.innerHTML = '<p class="text-xs text-slate-500 font-mono">Open a .vsm.json project file or select a template to begin.</p>';
         updateStatus('Ready', 'emerald'); dismissError(); return;
       }
@@ -389,6 +400,9 @@
           svgElement.setAttribute('preserveAspectRatio', 'xMidYMid meet');
           if (panZoomInstance) panZoomInstance.destroy();
           addEdgeHitPaths(svgElement);
+          injectGooeyFilter(svgElement);
+          buildDiagramIndex(svgElement);
+          applyStoredPositions();
           panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
           if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
           else refitCanvas();
@@ -398,7 +412,316 @@
       } catch (err) { showError(err.str || err.message || 'Syntax Error encountered.'); updateStatus('Syntax Error', 'rose'); }
     }
 
+    // ---- Phase 7: node dragging, elastic connector routing, gooey anchors ----
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const TRANSLATE_RE = /translate\(\s*(-?[\d.eE+-]+)[\s,]+(-?[\d.eE+-]+)\s*\)/;
+    let nodeIndex = {}, edgeIndex = [], drag = null, dragMoved = false, socketLayer = null;
+
+    function ensureMetrics(id) {
+      projectState.metrics = projectState.metrics || {};
+      if (!projectState.metrics[id]) projectState.metrics[id] = { title: id, owner: '', ct: 0, co: 0, wip: 0, friction: false };
+      return projectState.metrics[id];
+    }
+
+    function injectGooeyFilter(svg) {
+      let defs = svg.querySelector('defs');
+      if (!defs) { defs = document.createElementNS(SVG_NS, 'defs'); svg.insertBefore(defs, svg.firstChild); }
+      const f = document.createElementNS(SVG_NS, 'filter');
+      f.setAttribute('id', 'gooey-anchor');
+      // Enlarged region so the blur of a tiny socket group is not clipped.
+      ['x', 'y'].forEach(a => f.setAttribute(a, '-100%'));
+      ['width', 'height'].forEach(a => f.setAttribute(a, '300%'));
+      f.setAttribute('color-interpolation-filters', 'sRGB');
+      f.innerHTML = '<feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />' +
+        '<feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7" result="gooey" />' +
+        '<feBlend in="SourceGraphic" in2="gooey" />';
+      defs.appendChild(f);
+    }
+
+    function buildDiagramIndex(svg) {
+      nodeIndex = {}; edgeIndex = [];
+      const code = mermaidCodeInput.value, kind = diagramKind(code);
+      if (kind !== 'flow' && kind !== 'state') return;
+      svg.querySelectorAll('g.nodes > g').forEach(el => {
+        const id = (el.id.match(/^(?:flowchart|state)-(.+)-\d+$/) || [])[1];
+        const t = (el.getAttribute('transform') || '').match(TRANSLATE_RE);
+        if (!id || !t) return;
+        let box;
+        try { box = el.getBBox(); } catch (err) { return; }
+        el.dataset.nodeKey = id;
+        nodeIndex[id] = { el, box, baseX: +t[1], baseY: +t[2], x: +t[1], y: +t[2] };
+      });
+      const paths = [...svg.querySelectorAll('g.edgePaths > path:not(.edge-hit)')];
+      const labels = [...svg.querySelectorAll('g.edgeLabels > g.edgeLabel')];
+      const hits = [...svg.querySelectorAll('path.edge-hit[data-edge-for]')];
+      const trans = kind === 'state' ? parseStateTransitions(code) : null;
+      if (trans && trans.length !== paths.length) return;
+      paths.forEach((path, i) => {
+        let src, tgt;
+        if (trans) { src = trans[i].src === 'start' ? 'root_start' : trans[i].src; tgt = trans[i].tgt === 'end' ? 'root_end' : trans[i].tgt; }
+        else { const cls = path.getAttribute('class') || ''; src = (cls.match(/\bLS-(\S+)/) || [])[1]; tgt = (cls.match(/\bLE-(\S+)/) || [])[1]; }
+        if (!src || !tgt) return;
+        edgeIndex.push({ path, src, tgt, hits: hits.filter(h => h.dataset.edgeFor === path.id), label: labels.length === paths.length ? labels[i] : null });
+      });
+    }
+
+    function applyStoredPositions() {
+      const moved = [];
+      Object.entries(nodeIndex).forEach(([id, n]) => {
+        const pos = projectState.metrics?.[id]?.pos;
+        if (!pos) return;
+        n.x = n.baseX + (Number(pos.x) || 0); n.y = n.baseY + (Number(pos.y) || 0);
+        n.el.setAttribute('transform', `translate(${n.x}, ${n.y})`);
+        moved.push(id);
+      });
+      moved.forEach(updateNodeConnections);
+    }
+
+    function nodeBounds(id) {
+      const n = nodeIndex[id];
+      if (!n) return null;
+      return { cx: n.x + n.box.x + n.box.width / 2, cy: n.y + n.box.y + n.box.height / 2, hw: n.box.width / 2, hh: n.box.height / 2 };
+    }
+
+    // Redraws one edge as a cubic Bezier between the facing sides of its two nodes.
+    function routeEdge(e) {
+      const a = nodeBounds(e.src), b = nodeBounds(e.tgt);
+      if (!a || !b || e.src === e.tgt) return null;
+      const dx = b.cx - a.cx, dy = b.cy - a.cy;
+      const horizontal = Math.abs(dx) >= Math.abs(dy);
+      const s = Math.sign(horizontal ? dx : dy) || 1;
+      let x1, y1, x2, y2, d;
+      if (horizontal) {
+        x1 = a.cx + s * a.hw; y1 = a.cy; x2 = b.cx - s * b.hw; y2 = b.cy;
+        const h = (x2 - x1) / 2;
+        d = `M ${x1} ${y1} C ${x1 + h} ${y1}, ${x2 - h} ${y2}, ${x2} ${y2}`;
+      } else {
+        x1 = a.cx; y1 = a.cy + s * a.hh; x2 = b.cx; y2 = b.cy - s * b.hh;
+        const h = (y2 - y1) / 2;
+        d = `M ${x1} ${y1} C ${x1} ${y1 + h}, ${x2} ${y2 - h}, ${x2} ${y2}`;
+      }
+      e.path.setAttribute('d', d);
+      e.hits.forEach(h => h.setAttribute('d', d));
+      if (e.label) e.label.setAttribute('transform', `translate(${(x1 + x2) / 2}, ${(y1 + y2) / 2})`);
+      const ox = horizontal ? s : 0, oy = horizontal ? 0 : s;
+      return { from: { x: x1, y: y1, ox, oy }, to: { x: x2, y: y2, ox: -ox, oy: -oy } };
+    }
+
+    // Returns the anchor sockets (edge endpoints) that sit on nodeId.
+    function updateNodeConnections(nodeId) {
+      const anchors = [];
+      edgeIndex.forEach(e => {
+        if (e.src !== nodeId && e.tgt !== nodeId) return;
+        const r = routeEdge(e);
+        if (r) anchors.push(e.src === nodeId ? r.from : r.to);
+      });
+      return anchors;
+    }
+
+    function drawSockets(anchors, parent) {
+      if (!socketLayer) {
+        socketLayer = document.createElementNS(SVG_NS, 'g');
+        socketLayer.setAttribute('pointer-events', 'none');
+        socketLayer.style.filter = 'url(#gooey-anchor)';
+        parent.appendChild(socketLayer);
+      }
+      socketLayer.innerHTML = anchors.map(a =>
+        `<circle cx="${a.x}" cy="${a.y}" r="5" fill="#60a5fa"/><circle cx="${a.x + a.ox * 9}" cy="${a.y + a.oy * 9}" r="3.5" fill="#60a5fa"/>`).join('');
+    }
+
+    function svgPointFor(el, e) {
+      const m = el.getScreenCTM();
+      return m ? new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()) : null;
+    }
+
+    function startNodeDrag(e) {
+      dragMoved = false;
+      if (e.button !== 0) return;
+      const el = e.target.closest('g.nodes > g');
+      const id = el?.dataset.nodeKey;
+      if (!id || !nodeIndex[id]) return;
+      // The node's parent CTM already includes the pan/zoom viewport transform.
+      const p = svgPointFor(el.parentNode, e);
+      if (!p) return;
+      drag = { id, n: nodeIndex[id], parent: el.parentNode, start: p, x0: nodeIndex[id].x, y0: nodeIndex[id].y, sx: e.clientX, sy: e.clientY, active: false };
+      if (panZoomInstance) panZoomInstance.disablePan();
+      window.addEventListener('pointermove', onNodeDragMove);
+      window.addEventListener('pointerup', endNodeDrag);
+      window.addEventListener('pointercancel', endNodeDrag);
+    }
+
+    function onNodeDragMove(e) {
+      if (!drag) return;
+      if (!(e.buttons & 1)) { endNodeDrag(); return; }
+      if (!drag.active) {
+        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+        drag.active = true; dragMoved = true;
+      }
+      const p = svgPointFor(drag.parent, e);
+      if (!p) return;
+      const n = drag.n;
+      n.x = drag.x0 + (p.x - drag.start.x); n.y = drag.y0 + (p.y - drag.start.y);
+      n.el.setAttribute('transform', `translate(${n.x}, ${n.y})`);
+      drawSockets(updateNodeConnections(drag.id), drag.parent);
+    }
+
+    function endNodeDrag() {
+      if (!drag) return;
+      window.removeEventListener('pointermove', onNodeDragMove);
+      window.removeEventListener('pointerup', endNodeDrag);
+      window.removeEventListener('pointercancel', endNodeDrag);
+      if (drag.active) {
+        const m = ensureMetrics(drag.id);
+        const pos = { x: Math.round((drag.n.x - drag.n.baseX) * 10) / 10, y: Math.round((drag.n.y - drag.n.baseY) * 10) / 10 };
+        if (pos.x || pos.y) m.pos = pos; else delete m.pos;
+      }
+      if (socketLayer) { socketLayer.remove(); socketLayer = null; }
+      if (panZoomInstance) panZoomInstance.enablePan();
+      drag = null;
+    }
+
+    // ---- Phase 7: Object Library and delete handler ----
+    function uniqueNodeId(base) {
+      const code = mermaidCodeInput.value;
+      let id = base, i = 2;
+      while (new RegExp('(^|[^\\w])' + id + '(?![\\w])').test(code) || projectState.metrics?.[id]) id = base + i++;
+      return id;
+    }
+
+    async function addLibraryNode(type) {
+      let code = mermaidCodeInput.value;
+      if (code.trim() && diagramKind(code) !== 'flow') { updateStatus('Library objects need a flowchart (graph / flowchart) diagram', 'amber'); return; }
+      if (!code.trim()) code = 'graph TD\n';
+      const spec = {
+        process: { base: 'NewNode', def: id => `${id}["New Process"]`, m: { title: 'New Process', owner: '', wip: 0 } },
+        decision: { base: 'NewDec', def: id => `${id}{"New Decision?"}`, m: { title: 'New Decision?', owner: '', wip: 0 } },
+        buffer: { base: 'NewWIP', def: id => `${id}[/"WIP: 10 Pcs"\\]`, m: { title: 'WIP: 10 Pcs', owner: 'Buffer', wip: 10 } }
+      }[type];
+      const id = uniqueNodeId(spec.base);
+      code = code.replace(/\s*$/, '\n') + `    ${spec.def(id)}\n`;
+      mermaidCodeInput.value = projectState.mermaid = code;
+      projectState.metrics = projectState.metrics || {};
+      projectState.metrics[id] = { title: spec.m.title, owner: spec.m.owner, ct: 0, co: 0, wip: spec.m.wip, friction: false };
+      updateLineNumbers(); calculateVSMMetrics();
+      await renderDiagram();
+      openInspector(id);
+    }
+
+    function lineBoundsAt(code, offset) {
+      const a = code.lastIndexOf('\n', offset - 1) + 1;
+      const b = code.indexOf('\n', offset);
+      return [a, b < 0 ? code.length : b + 1];
+    }
+
+    function removeLinesAt(code, offsets) {
+      const ranges = [...new Set(offsets.map(o => lineBoundsAt(code, o)[0]))].sort((x, y) => y - x);
+      ranges.forEach(a => { const [s, e] = lineBoundsAt(code, a); code = code.slice(0, s) + code.slice(e); });
+      return code;
+    }
+
+    // Rebuilds one flowchart line after removing a node and/or one connector; chains are split, never bridged.
+    function rewriteFlowLine(line, lineStart, nodeId, edgeStart) {
+      const masked = maskMermaidLine(line);
+      const conns = [...masked.matchAll(EDGE_CONN)];
+      const indent = line.match(/^[ \t]*/)[0];
+      const bounds = []; let prev = 0;
+      conns.forEach(m => { bounds.push([prev, m.index]); prev = m.index + m[0].length; });
+      bounds.push([prev, line.length]);
+      let touched = false;
+      const segs = bounds.map(([a, b]) => {
+        const keep = []; let pos = a;
+        masked.slice(a, b).split('&').forEach(p => {
+          const orig = line.slice(pos, pos + p.length); pos += p.length + 1;
+          const id = (p.match(/^\s*(\w+)/) || [])[1];
+          if (nodeId && id === nodeId) touched = true; else if (orig.trim()) keep.push(orig.trim());
+        });
+        return keep.length ? keep.join(' & ') : null;
+      });
+      const dropConn = conns.map(m => edgeStart != null && lineStart + m.index === edgeStart);
+      if (dropConn.some(Boolean)) touched = true;
+      if (!touched) return null;
+      const out = []; let cur = null;
+      const flush = () => { if (cur !== null) out.push(indent + cur); cur = null; };
+      segs.forEach((seg, i) => {
+        if (seg === null) { flush(); return; }
+        if (cur !== null && i > 0 && !dropConn[i - 1]) cur += ' ' + line.slice(conns[i - 1].index, conns[i - 1].index + conns[i - 1][0].length) + ' ' + seg;
+        else { flush(); cur = seg; }
+      });
+      flush();
+      return out;
+    }
+
+    function deleteFromFlowchart(code, nodeId, edgeStart) {
+      let offset = 0;
+      const out = [];
+      code.split('\n').forEach(line => {
+        const lineStart = offset; offset += line.length + 1;
+        if (nodeId && /^\s*(?:class|style|click)\s/.test(line)) {
+          const cm = line.match(/^(\s*class\s+)(\S+)(\s+.*)$/);
+          if (cm) {
+            const ids = cm[2].split(',');
+            if (ids.includes(nodeId)) {
+              const rest = ids.filter(i => i !== nodeId);
+              if (rest.length) out.push(cm[1] + rest.join(',') + cm[3]);
+              return;
+            }
+          } else if (new RegExp('^\\s*(?:style|click)\\s+' + escapeRegExp(nodeId) + '(?![\\w])').test(line)) return;
+          out.push(line); return;
+        }
+        if (EDGE_SKIP.test(line)) { out.push(line); return; }
+        const rewritten = rewriteFlowLine(line, lineStart, nodeId, edgeStart);
+        if (rewritten) out.push(...rewritten); else out.push(line);
+      });
+      return out.join('\n');
+    }
+
+    const SEQ_LINE = /^\s*(\w+)\s*(?:-->>|->>|--x|-x|--\)|-\)|-->|->)[+-]?\s*(\w+)\s*:/;
+
+    function deleteNodeFromCode(code, kind, id) {
+      if (kind === 'flow') {
+        if (!findNodeDefs(code, id).length && findSubgraph(code, id)) return null;
+        return deleteFromFlowchart(code, id, null);
+      }
+      if (kind === 'sequence') {
+        const decl = new RegExp('^\\s*(?:participant|actor)\\s+' + escapeRegExp(id) + '(?![\\w])');
+        return code.split('\n').filter(l => { const m = l.match(SEQ_LINE); return !decl.test(l) && !(m && (m[1] === id || m[2] === id)); }).join('\n');
+      }
+      if (kind === 'state') {
+        const key = id === 'root_start' ? 'start' : id === 'root_end' ? 'end' : id;
+        const offsets = parseStateTransitions(code).filter(t => t.src === key || t.tgt === key).map(t => t.start);
+        let next = removeLinesAt(code, offsets);
+        const own = new RegExp('^\\s*(?:' + escapeRegExp(id) + '\\s*:|state\\s+.*\\bas\\s+' + escapeRegExp(id) + '\\b)');
+        return next.split('\n').filter(l => !own.test(l)).join('\n');
+      }
+      return null;
+    }
+
+    function deleteEdgeFromCode(code, kind, edgeRef) {
+      if (kind === 'flow') {
+        const edge = parseMermaidEdges(code).find(e => e.src === edgeRef.src && e.tgt === edgeRef.tgt && e.idx === edgeRef.idx);
+        return edge ? deleteFromFlowchart(code, null, edge.start) : null;
+      }
+      const list = kind === 'sequence' ? parseSequenceMessages(code) : kind === 'state' ? parseStateTransitions(code) : [];
+      const edge = list.find(e => e.ord === edgeRef.ord);
+      return edge ? removeLinesAt(code, [edge.start]) : null;
+    }
+
+    async function deleteSelected() {
+      const code = mermaidCodeInput.value, kind = diagramKind(code);
+      if (!activeEdge && !activeNodeId) { updateStatus('Select a node or connection first', 'amber'); return; }
+      const nodeId = activeNodeId, edgeRef = activeEdge;
+      const next = edgeRef ? deleteEdgeFromCode(code, kind, edgeRef) : deleteNodeFromCode(code, kind, nodeId);
+      if (next === null || next === code) { updateStatus('Nothing to delete for this selection (subgraphs are not deletable)', 'amber'); return; }
+      mermaidCodeInput.value = projectState.mermaid = next;
+      if (nodeId) delete projectState.metrics[nodeId];
+      if (edgeRef && projectState.edges) delete projectState.edges[edgeKey(edgeRef)];
+      closeInspector();
+      updateLineNumbers(); calculateVSMMetrics();
+      await renderDiagram();
+    }
+
     function openInspector(nodeId) {
+      activeEdge = null;
       activeNodeId = nodeId; document.getElementById('inspectorNodeId').value = nodeId;
       if (!projectState.metrics[nodeId]) { projectState.metrics[nodeId] = { title: nodeId, owner: '', ct: 0, co: 0, wip: 0, friction: false }; }
       const m = projectState.metrics[nodeId];
@@ -449,7 +772,8 @@
         wip: parseFloat(document.getElementById('inspectorWIP').value) || 0,
         friction: document.getElementById('inspectorFriction').checked,
         shape: document.getElementById('inspectorNodeShape').value,
-        icon: document.getElementById('inspectorNodeIcon').value
+        icon: document.getElementById('inspectorNodeIcon').value,
+        pos: projectState.metrics[activeNodeId]?.pos
       };
       syncNodeToMermaid(activeNodeId, projectState.metrics[activeNodeId]);
       calculateVSMMetrics();
@@ -611,6 +935,7 @@
     }
 
     function showEdgeInspector(edge) {
+      activeNodeId = null;
       activeEdge = { kind: edge.kind || 'flow', src: edge.src, tgt: edge.tgt, idx: edge.idx, ord: edge.ord };
       document.getElementById('inspectorEdgeId').value = edgeKey(edge);
       document.getElementById('inspectorEdgeLabel').value = edge.label;
@@ -903,6 +1228,7 @@
             const parsed = JSON.parse(content);
             if (parsed.mermaid) {
               projectState = parsed;
+              projectState.metrics = projectState.metrics || {};
               if (parsed.project?.title) projectState.title = parsed.project.title;
               mermaidCodeInput.value = parsed.mermaid;
             }
