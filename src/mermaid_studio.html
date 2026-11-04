@@ -8,6 +8,21 @@
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    // If a CDN is blocked (sandboxed/cross-origin iframe, offline), keep the rest of the app alive instead of throwing.
+    window.lucide = window.lucide || { createIcons() {} };
+  </script>
+  <style id="criticalFallback">
+    /* Self-contained dark baseline: applies instantly and holds if the Tailwind CDN never loads. */
+    html, body { height: 100%; margin: 0; background: #020617; color: #f1f5f9; color-scheme: dark; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    button, input, select, textarea { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; font: inherit; }
+    button { cursor: pointer; }
+    .h-full { height: 100%; } .w-full { width: 100%; } .flex { display: flex; } .flex-col { flex-direction: column; } .flex-1 { flex: 1 1 0%; }
+    .hidden { display: none; } .relative { position: relative; } .absolute { position: absolute; } .fixed { position: fixed; }
+    .overflow-hidden { overflow: hidden; } .items-center { align-items: center; } .justify-between { justify-content: space-between; }
+    #depWarning { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 100; max-width: 90vw; padding: 6px 12px; border-radius: 6px; font-size: 12px; background: #451a03; color: #fcd34d; border: 1px solid #92400e; }
+    #depWarning[hidden] { display: none; }
+  </style>
   <style>
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #0f172a; }
@@ -74,6 +89,7 @@
   </style>
 </head>
 <body class="h-full flex flex-col text-slate-100 overflow-hidden font-sans">
+  <div id="depWarning" hidden role="alert">Some libraries failed to load (CDN blocked or offline). Rendering is unavailable &mdash; use the bundled build (scripts/build_bundle.py).</div>
   <header class="bg-slate-900 border-b border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-50 shrink-0">
     <div class="flex items-center space-x-2">
       <div class="bg-blue-600 p-1.5 rounded-lg flex items-center justify-center text-white"><i data-lucide="code-2" class="w-5 h-5"></i></div>
@@ -419,9 +435,11 @@
     const inspectorDrawer = document.getElementById('inspectorDrawer');
 
     window.addEventListener('DOMContentLoaded', () => {
-      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose', flowchart: { htmlLabels: true, curve: 'basis' } });
+      if (window.mermaid) mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose', flowchart: { htmlLabels: true, curve: 'basis' } });
+      else document.getElementById('depWarning').hidden = false;
       mermaidCodeInput.value = projectState.mermaid;
-      updateLineNumbers(); renderDiagram();
+      // Hydrate ?state= first so an embedded load renders once, directly, instead of flashing the default template.
+      if (!loadStateFromURL()) { updateLineNumbers(); renderDiagram(); }
       ['input', 'paste', 'change', 'keyup'].forEach(evt => {
         mermaidCodeInput.addEventListener(evt, () => { projectState.mermaid = mermaidCodeInput.value; updateLineNumbers(); debouncedRender(); });
       });
@@ -470,33 +488,57 @@
       });
       lucide.createIcons();
       calculateVSMMetrics();
-      loadStateFromURL();
       applyMobileCollapse();
+      if (window.parent !== window) window.parent.postMessage({ type: 'vsm:ready' }, '*');
     });
 
+    function decodeStateParam(encoded) {
+      const b64 = encoded.trim().replace(/ /g, '+').replace(/-/g, '+').replace(/_/g, '/');
+      const bytes = Uint8Array.from(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder().decode(bytes));
+    }
+
+    function hydrateFromState(parsed) {
+      if (!parsed || typeof parsed.mermaid !== 'string' || !parsed.mermaid.trim()) throw new Error('State has no "mermaid" field.');
+      projectState = parsed;
+      projectState.metrics = projectState.metrics || {};
+      normalizePositions();
+      if (parsed.project?.title) projectState.title = parsed.project.title;
+      mermaidCodeInput.value = parsed.mermaid;
+      resetInteractionState();
+      updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
+    }
+
     // Hydrates the workspace from ?state=<base64 or base64url of a .vsm.json> (or #state=...).
+    // Returns true when state was found and rendered, so startup can skip the default-template render.
     function loadStateFromURL() {
       const params = new URLSearchParams(location.search || '');
       const hashParams = new URLSearchParams((location.hash || '').replace(/^#/, ''));
       const encoded = params.get('state') || hashParams.get('state');
-      if (!encoded) return;
+      if (!encoded) return false;
       try {
-        const b64 = encoded.trim().replace(/ /g, '+').replace(/-/g, '+').replace(/_/g, '/');
-        const bytes = Uint8Array.from(atob(b64.padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
-        const parsed = JSON.parse(new TextDecoder().decode(bytes));
-        if (!parsed || typeof parsed.mermaid !== 'string' || !parsed.mermaid.trim()) throw new Error('State has no "mermaid" field.');
-        projectState = parsed;
-        projectState.metrics = projectState.metrics || {};
-        normalizePositions();
-        if (parsed.project?.title) projectState.title = parsed.project.title;
-        mermaidCodeInput.value = parsed.mermaid;
-        resetInteractionState();
-        updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
+        hydrateFromState(decodeStateParam(encoded));
+        return true;
       } catch (err) {
         updateStatus('Could not load ?state= parameter', 'rose');
         console.warn('Invalid state URL parameter:', err);
+        return false;
       }
     }
+
+    // Embedding API: a host page (e.g. Open WebUI) can push state with
+    // iframe.contentWindow.postMessage({ type: 'vsm:load', state: <object | base64 string> }, '*').
+    // Only messages from the direct parent window are accepted.
+    window.addEventListener('message', (e) => {
+      if (e.source !== window.parent || window.parent === window || !e.data || e.data.type !== 'vsm:load') return;
+      try {
+        hydrateFromState(typeof e.data.state === 'string' ? decodeStateParam(e.data.state) : e.data.state);
+        window.parent.postMessage({ type: 'vsm:loaded', title: projectState.title }, '*');
+      } catch (err) {
+        updateStatus('Could not load embedded state', 'rose');
+        window.parent.postMessage({ type: 'vsm:error', message: String(err.message || err) }, '*');
+      }
+    });
 
     function calculateVSMMetrics() {
       let totalVA = 0, totalCO = 0, totalWIP = 0, frictionCount = 0;
@@ -527,6 +569,7 @@
       let pan = null, zoom = null;
       if (panZoomInstance) { pan = panZoomInstance.getPan(); zoom = panZoomInstance.getZoom(); }
       try {
+        if (!window.mermaid) throw new Error('Mermaid library did not load (CDN blocked?). Use the bundled build for restricted networks.');
         await mermaid.parse(code);
         mermaidRender.innerHTML = '';
         const id = 'mermaid-svg-' + Date.now();
@@ -551,8 +594,9 @@
           }
           applyStoredPositions();
           renderNotes();
-          panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
-          if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
+          panZoomInstance = window.svgPanZoom ? svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null }) : null;
+          if (!panZoomInstance) { /* pan/zoom library unavailable: show the static diagram */ }
+          else if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
           else refitCanvas();
         }
         const nodes = (code.match(/\[.*?\]|\(.*?\)|/g) || []).length;

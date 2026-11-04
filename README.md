@@ -41,6 +41,14 @@ $b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content proje
 
 Browsers and servers limit URL length, so this suits small to medium projects. Use the Open button for large files.
 
+## Embedding (Open WebUI / iframes)
+
+- `?state=` is hydrated before the first render, so an embedded load renders once with no manual step. Base64 and base64url (padded or not) both work.
+- A host page can push state with `iframe.contentWindow.postMessage({ type: 'vsm:load', state: <object | base64> }, '*')`. The app announces `vsm:ready`, then replies `vsm:loaded` or `vsm:error`. Only messages from the direct parent are accepted.
+- A dark baseline style is inlined, and a warning banner appears if a CDN is blocked.
+- [`integrations/open_webui_tool.py`](integrations/open_webui_tool.py) is an Open WebUI Tool that emits the iframe (`sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals"`). It falls back to postMessage when the state is too large for a URL. Keep the app on a different origin from Open WebUI when using `allow-same-origin` with `allow-scripts`.
+- **Offline / internal hosting:** `python scripts/build_bundle.py` writes `dist/mermaid_studio.bundle.html`, with Tailwind, Mermaid, svg-pan-zoom and Lucide inlined (about 4.4 MB, no network needed). The Tailwind Play script is inlined as-is; for a leaner build, precompile CSS with the Tailwind standalone CLI and replace that tag. Pin `lucide@latest` to a fixed version first for reproducible builds.
+
 ## Mobile
 
 Below 768px the code editor starts collapsed (reopen with its chevron), the inspector docks as a bottom sheet, inspector controls have 44px touch targets, and floating bottom panels respect `env(safe-area-inset-bottom)` (`viewport-fit=cover`). Reload after resizing across the breakpoint to reset the editor state.
