@@ -331,11 +331,21 @@
 
     // Node drag offsets live in projectState.positions[nodeId]; older files stored them in metrics[nodeId].pos.
     function normalizePositions() {
-      const pos = projectState.positions = (projectState.positions && typeof projectState.positions === 'object') ? projectState.positions : {};
-      Object.entries(projectState.metrics || {}).forEach(([id, m]) => {
+      const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+      if (!isObj(projectState.metrics)) projectState.metrics = {};
+      const pos = projectState.positions = isObj(projectState.positions) ? projectState.positions : {};
+      Object.entries(projectState.metrics).forEach(([id, m]) => {
         if (m && m.pos) { if (!pos[id]) pos[id] = m.pos; delete m.pos; }
       });
+      // Drop malformed entries so rendering never sees NaN or non-object offsets.
+      Object.entries(pos).forEach(([id, p]) => {
+        if (!isObj(p) || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) delete pos[id];
+        else pos[id] = { x: Number(p.x), y: Number(p.y) };
+      });
     }
+
+    // Switching projects must not leave an inspector or connect session pointing at the previous diagram.
+    function resetInteractionState() { closeInspector(); if (connectArmed || connectSourceNodeId) disarmConnectMode(); }
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null, activeEdge = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
     const mermaidRender = document.getElementById('mermaidRender');
@@ -415,6 +425,7 @@
         normalizePositions();
         if (parsed.project?.title) projectState.title = parsed.project.title;
         mermaidCodeInput.value = parsed.mermaid;
+        resetInteractionState();
         updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
       } catch (err) {
         updateStatus('Could not load ?state= parameter', 'rose');
@@ -612,8 +623,6 @@
     function onExtraPointerDown(e) { if (drag && e.pointerId !== drag.pointerId) endNodeDrag(); }
 
     function startNodeDrag(e) {
-      // A second finger means pinch/pan: hand the gesture back to the canvas.
-      if (drag && e.pointerId !== drag.pointerId) { endNodeDrag(); return; }
       dragMoved = false;
       if (e.pointerType === 'mouse' ? e.button !== 0 : !e.isPrimary) return;
       const id = cleanNodeId(e.target);
@@ -647,8 +656,8 @@
       drawSockets(updateNodeConnections(drag.id), drag.parent);
     }
 
-    function endNodeDrag() {
-      if (!drag) return;
+    function endNodeDrag(e) {
+      if (!drag || (e && e.pointerId !== undefined && e.pointerId !== drag.pointerId)) return;
       window.removeEventListener('pointermove', onNodeDragMove);
       window.removeEventListener('pointerup', endNodeDrag);
       window.removeEventListener('pointercancel', endNodeDrag);
@@ -1385,7 +1394,8 @@
               mermaidCodeInput.value = parsed.mermaid;
             }
           } catch(err) { alert('Invalid project JSON file.'); }
-        } else { projectState.mermaid = content; mermaidCodeInput.value = content; }
+        } else { projectState.mermaid = content; projectState.positions = {}; mermaidCodeInput.value = content; }
+        resetInteractionState();
         updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
       };
       reader.readAsText(file);
@@ -1438,7 +1448,7 @@
     function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
     function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
     function resetZoom() { if (panZoomInstance) { panZoomInstance.resetZoom(); panZoomInstance.fit(); panZoomInstance.center(); } }
-    function clearCode() { mermaidCodeInput.value = ''; updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
+    function clearCode() { mermaidCodeInput.value = ''; projectState.positions = {}; resetInteractionState(); updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
     function formatCode() { mermaidCodeInput.value = mermaidCodeInput.value.split('\n').map(l => l.trimEnd()).join('\n'); updateLineNumbers(); }
     const EXPORT_STYLE_PROPS = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'opacity', 'font-family', 'font-size', 'font-weight', 'font-style', 'color', 'background-color', 'text-anchor', 'dominant-baseline', 'text-align', 'line-height', 'display', 'padding', 'white-space', 'overflow', 'visibility', 'filter'];
     function exportBaseName() {
