@@ -17,7 +17,7 @@
 ### Canvas interaction
 * **Layout:** `#previewPanel` fills the window. The editor (bottom-left), Object Library (top-left) and Inspector (top-right) are floating cards.
 * **Node dragging:** pointer events on `#mermaidRender`. Coordinates come from the node's parent `getScreenCTM().inverse()` so dragging stays correct when panned or zoomed. A drag starts after 4px of movement; svg-pan-zoom panning is disabled during the drag. Flowchart and state nodes are draggable; sequence actors are not.
-* **Position persistence:** the offset from Mermaid's layout position is stored in `projectState.metrics[id].pos = {x, y}` and re-applied after each render.
+* **Position persistence:** the offset from Mermaid's layout position is stored in `projectState.positions[id] = {x, y}` and re-applied after each render. Dragging uses Pointer Events: a capture-phase `pointerdown` on `#mermaidRender`, `setPointerCapture` once movement exceeds 4px (below that it is a tap), `getScreenCTM().inverse()` for deltas, a second finger cancels the drag, and node IDs come from `cleanNodeId()` (strips Mermaid's `flowchart-`/`state-` prefix and numeric suffix).
 * **Elastic routing:** `updateNodeConnections(nodeId)` redraws connected edges (and their hit-paths and labels) as cubic Beziers anchored at the facing side midpoints of the node boxes. The `#gooey-anchor` SVG filter (blur + color matrix) is applied to anchor sockets only while dragging.
 * **Object Library:** adds `NewNode`, `NewDec` and `NewWIP` definitions with unique ids, connects nodes (`toggleConnectMode`), and deletes the active node or edge (`deleteSelected`). Flowchart-only for adds and connects.
 

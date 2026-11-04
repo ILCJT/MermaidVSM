@@ -26,7 +26,9 @@
     }
     /* Invisible padded stroke (added by addEdgeHitPaths) so thin lines are easy to click */
     #mermaidRender .edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; stroke-dasharray: none !important; cursor: pointer; pointer-events: stroke; }
-    #mermaidRender { user-select: none; touch-action: none; }
+    /* The canvas keeps native pan gestures; only node shapes opt out so a touch drag moves the node instead of being claimed by the browser. */
+    #mermaidRender { user-select: none; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+    #mermaidRender g.nodes > g { touch-action: none; }
     #mermaidRender .node foreignObject, #mermaidRender .node foreignObject div { overflow: visible !important; }
     @keyframes connectPulse { 0%, 100% { stroke-opacity: 1; stroke-width: 3px; } 50% { stroke-opacity: 0.35; stroke-width: 5px; } }
     #mermaidRender .connect-source rect, #mermaidRender .connect-source path, #mermaidRender .connect-source polygon,
@@ -38,6 +40,11 @@
     #zoomControls { bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
     #vsmSummaryLadder { padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px)); }
     #inspectorDrawer { max-width: calc(100vw - 1.5rem); }
+    @media (pointer: coarse) {
+      header button, header select, header label, #objectLibrary button, #editorPanel button, #zoomControls button { min-height: 44px; }
+      #zoomControls button, #editorPanel button { min-width: 44px; }
+      #inspectorDrawer button, #inspectorDrawer select, #inspectorDrawer input:not([type="checkbox"]) { min-height: 44px; }
+    }
     @media (max-width: 767px) {
       #inspectorDrawer button, #inspectorDrawer select, #inspectorDrawer input:not([type="checkbox"]) { min-height: 44px; }
       #inspectorDrawer { left: 0.75rem; right: 0.75rem; top: auto; bottom: calc(3rem + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55vh; z-index: 40; }
@@ -320,7 +327,15 @@
         metrics: {}
       }
     };
-    let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {} };
+    let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {}, positions: {} };
+
+    // Node drag offsets live in projectState.positions[nodeId]; older files stored them in metrics[nodeId].pos.
+    function normalizePositions() {
+      const pos = projectState.positions = (projectState.positions && typeof projectState.positions === 'object') ? projectState.positions : {};
+      Object.entries(projectState.metrics || {}).forEach(([id, m]) => {
+        if (m && m.pos) { if (!pos[id]) pos[id] = m.pos; delete m.pos; }
+      });
+    }
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null, activeEdge = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
     const mermaidRender = document.getElementById('mermaidRender');
@@ -341,7 +356,7 @@
       dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-blue-950/20'); });
       dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-blue-950/20'));
       dropZone.addEventListener('drop', handleFileDrop);
-      mermaidRender.addEventListener('pointerdown', startNodeDrag);
+      mermaidRender.addEventListener('pointerdown', startNodeDrag, true);
       mermaidRender.addEventListener('click', (e) => {
         if (dragMoved) { dragMoved = false; return; }
         if (connectArmed) {
@@ -372,6 +387,7 @@
           projectState.mermaid = selected.mermaid;
           projectState.metrics = JSON.parse(JSON.stringify(selected.metrics || {}));
           projectState.edges = {};
+          projectState.positions = {};
           mermaidCodeInput.value = selected.mermaid;
           closeInspector();
           updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
@@ -396,6 +412,7 @@
         if (!parsed || typeof parsed.mermaid !== 'string' || !parsed.mermaid.trim()) throw new Error('State has no "mermaid" field.');
         projectState = parsed;
         projectState.metrics = projectState.metrics || {};
+        normalizePositions();
         if (parsed.project?.title) projectState.title = parsed.project.title;
         mermaidCodeInput.value = parsed.mermaid;
         updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
@@ -494,7 +511,7 @@
       const code = mermaidCodeInput.value, kind = diagramKind(code);
       if (kind !== 'flow' && kind !== 'state') return;
       svg.querySelectorAll('g.nodes > g').forEach(el => {
-        const id = (el.id.match(/^(?:flowchart|state)-(.+)-\d+$/) || [])[1];
+        const id = (el.id.match(NODE_DOM_ID_RE) || [])[1];
         const t = (el.getAttribute('transform') || '').match(TRANSLATE_RE);
         if (!id || !t) return;
         let box;
@@ -519,7 +536,7 @@
     function applyStoredPositions() {
       const moved = [];
       Object.entries(nodeIndex).forEach(([id, n]) => {
-        const pos = projectState.metrics?.[id]?.pos;
+        const pos = projectState.positions?.[id];
         if (!pos) return;
         n.x = n.baseX + (Number(pos.x) || 0); n.y = n.baseY + (Number(pos.y) || 0);
         n.el.setAttribute('transform', `translate(${n.x}, ${n.y})`);
@@ -585,29 +602,43 @@
       return m ? new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse()) : null;
     }
 
+    // Strips Mermaid's render prefix/suffix ("flowchart-NodeId-12") from the closest node group's id.
+    const NODE_DOM_ID_RE = /^(?:flowchart|state)-(.+)-\d+$/;
+    function cleanNodeId(target) {
+      const g = target?.closest?.('.node, g[id^="flowchart-"], g[id^="state-"]');
+      return g ? (g.id.match(NODE_DOM_ID_RE) || [])[1] || null : null;
+    }
+
+    function onExtraPointerDown(e) { if (drag && e.pointerId !== drag.pointerId) endNodeDrag(); }
+
     function startNodeDrag(e) {
+      // A second finger means pinch/pan: hand the gesture back to the canvas.
+      if (drag && e.pointerId !== drag.pointerId) { endNodeDrag(); return; }
       dragMoved = false;
-      if (e.button !== 0) return;
-      const el = e.target.closest('g.nodes > g');
-      const id = el?.dataset.nodeKey;
-      if (!id || !nodeIndex[id]) return;
+      if (e.pointerType === 'mouse' ? e.button !== 0 : !e.isPrimary) return;
+      const id = cleanNodeId(e.target);
+      if (!id || !nodeIndex[id] || !nodeIndex[id].el.contains(e.target)) return;
+      const el = nodeIndex[id].el;
       // The node's parent CTM already includes the pan/zoom viewport transform.
       const p = svgPointFor(el.parentNode, e);
       if (!p) return;
-      drag = { id, n: nodeIndex[id], parent: el.parentNode, start: p, x0: nodeIndex[id].x, y0: nodeIndex[id].y, sx: e.clientX, sy: e.clientY, active: false };
+      drag = { id, el, n: nodeIndex[id], parent: el.parentNode, start: p, x0: nodeIndex[id].x, y0: nodeIndex[id].y, sx: e.clientX, sy: e.clientY, active: false, pointerId: e.pointerId };
       if (panZoomInstance) panZoomInstance.disablePan();
       window.addEventListener('pointermove', onNodeDragMove);
       window.addEventListener('pointerup', endNodeDrag);
       window.addEventListener('pointercancel', endNodeDrag);
+      window.addEventListener('pointerdown', onExtraPointerDown, true);
     }
 
     function onNodeDragMove(e) {
-      if (!drag) return;
+      if (!drag || e.pointerId !== drag.pointerId) return;
       if (!(e.buttons & 1)) { endNodeDrag(); return; }
       if (!drag.active) {
-        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
+        if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) <= 4) return;
         drag.active = true; dragMoved = true;
+        try { drag.el.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
       }
+      e.preventDefault();
       const p = svgPointFor(drag.parent, e);
       if (!p) return;
       const n = drag.n;
@@ -621,11 +652,13 @@
       window.removeEventListener('pointermove', onNodeDragMove);
       window.removeEventListener('pointerup', endNodeDrag);
       window.removeEventListener('pointercancel', endNodeDrag);
+      window.removeEventListener('pointerdown', onExtraPointerDown, true);
       if (drag.active) {
-        const m = ensureMetrics(drag.id);
+        projectState.positions = projectState.positions || {};
         const pos = { x: Math.round((drag.n.x - drag.n.baseX) * 10) / 10, y: Math.round((drag.n.y - drag.n.baseY) * 10) / 10 };
-        if (pos.x || pos.y) m.pos = pos; else delete m.pos;
+        if (pos.x || pos.y) projectState.positions[drag.id] = pos; else delete projectState.positions[drag.id];
       }
+      try { if (drag.el.hasPointerCapture(drag.pointerId)) drag.el.releasePointerCapture(drag.pointerId); } catch (err) { /* element may be gone after a re-render */ }
       if (socketLayer) { socketLayer.remove(); socketLayer = null; }
       if (panZoomInstance) panZoomInstance.enablePan();
       drag = null;
@@ -764,7 +797,7 @@
       const next = edgeRef ? deleteEdgeFromCode(code, kind, edgeRef) : deleteNodeFromCode(code, kind, nodeId);
       if (next === null || next === code) { updateStatus('Nothing to delete for this selection (subgraphs are not deletable)', 'amber'); return; }
       mermaidCodeInput.value = projectState.mermaid = next;
-      if (nodeId) delete projectState.metrics[nodeId];
+      if (nodeId) { delete projectState.metrics[nodeId]; if (projectState.positions) delete projectState.positions[nodeId]; }
       if (edgeRef && projectState.edges) delete projectState.edges[edgeKey(edgeRef)];
       closeInspector();
       updateLineNumbers(); calculateVSMMetrics();
@@ -870,8 +903,7 @@
         wip: parseFloat(document.getElementById('inspectorWIP').value) || 0,
         friction: document.getElementById('inspectorFriction').checked,
         shape: document.getElementById('inspectorNodeShape').value,
-        icon: document.getElementById('inspectorNodeIcon').value,
-        pos: projectState.metrics[activeNodeId]?.pos
+        icon: document.getElementById('inspectorNodeIcon').value
       };
       syncNodeToMermaid(activeNodeId, projectState.metrics[activeNodeId]);
       calculateVSMMetrics();
@@ -1348,6 +1380,7 @@
             if (parsed.mermaid) {
               projectState = parsed;
               projectState.metrics = projectState.metrics || {};
+              normalizePositions();
               if (parsed.project?.title) projectState.title = parsed.project.title;
               mermaidCodeInput.value = parsed.mermaid;
             }

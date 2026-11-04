@@ -8,7 +8,7 @@ Mermaid Studio is an interactive, single-file HTML / ES6 / Tailwind CSS workspac
 
 ## Features
 
-- **Dynamic SVG drag-and-drop:** drag flowchart and state-diagram nodes on the canvas. Offsets are saved per node in `metrics[id].pos` and re-applied after every render.
+- **Dynamic SVG drag-and-drop:** drag flowchart and state-diagram nodes on the canvas. Works with mouse, pen and touch (Pointer Events, >4px movement starts a drag, a tap selects). Offsets are saved per node in `projectState.positions[id]` and re-applied after every render.
 - **Gooey Bezier line routing:** connected edges are redrawn as cubic Bezier curves while you drag, and `#gooey-anchor` SVG-filtered anchor sockets appear on the dragged node.
 - **Dual-tab Node / Edge inspector:** a floating drawer for node title, shape, icon, owner, C/T, C/O, WIP and friction, and for connector label, line style and arrowhead. Edits write back into the Mermaid code live.
 - **Top-rim Lean process icon badges:** non-redundant VSM symbols (dedicated/shared process, workcell, supplier, customer, kaizen burst, milk run, supermarket, go-see) float on the node's top border.
