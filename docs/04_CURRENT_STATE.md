@@ -10,9 +10,11 @@
 * [x] **Phase 7 (Interactive Canvas HUD):** Canvas-first floating layout, node dragging with elastic Bezier routing and gooey anchors, Object Library (add / connect / delete), dual-tab Node/Edge inspector, shape selector, top-rim VSM process icon badges (`data-icon`), bottom metric sub-pills, friction class sync across templates, and `?state=` Base64 URL hydration.
 * [x] **Mobile Responsive HUDs:** Under 768px the editor starts collapsed and the inspector docks as a bottom sheet; inspector controls are at least 44px tall; bottom panels add `env(safe-area-inset-bottom)` (`viewport-fit=cover`).
 * [x] **Export Hygiene:** after each render `pruneOrphanPositions()` removes offsets for nodes that no longer exist. SVG exports wrap every HTML label in `<switch>` with a plain SVG `<text>` fallback for viewers without `foreignObject` support.
-* [x] **Image-First Save Flow:** one "Save Image" menu (PNG / SVG, then the `.vsm.json` project file). `pickSaveHandle()` uses `showSaveFilePicker` when available; cancelling aborts, any other failure or missing API falls back to an `<a download>`. After a template, file or URL load, `pruneOrphanMetrics()` drops metrics for node IDs not in the rendered diagram (not on ordinary typing edits). "Copy Code" uses `navigator.clipboard` with an `execCommand` fallback.
+* [x] **Process Notes:** yellow cards attached to nodes via `projectState.notes`; see the architecture spec. Notes are saved in `.vsm.json`/`?state=`, follow their node when it is dragged, and are included in SVG/PNG exports.
+ one "Save Image" menu (PNG / SVG, then the `.vsm.json` project file). `pickSaveHandle()` uses `showSaveFilePicker` when available; cancelling aborts, any other failure or missing API falls back to an `<a download>`. After a template, file or URL load, `pruneOrphanMetrics()` drops metrics for node IDs not in the rendered diagram (not on ordinary typing edits). "Copy Code" uses `navigator.clipboard` with an `execCommand` fallback.
 
 ## Known Limitations
+* Process Notes work on flowchart and state diagrams only (they need a draggable node to attach to) and use a dark yellow palette only; there is no light-mode variant because the app is dark-only.
 * Dragging, Library adds and Connect Nodes support flowcharts (state diagrams are draggable); sequence actors are not draggable.
 * Deleting a subgraph is not supported, and deleting an edge does not reindex `linkStyle` lines.
 * Earlier icon keys (`user`, `alert`, `box`, `check`, `clock`, `truck`, `db`, `gear`) were replaced and load as "No Process Icon".

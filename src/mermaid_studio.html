@@ -35,6 +35,8 @@
     #mermaidRender .connect-source circle, #mermaidRender .connect-source ellipse { stroke: #22c55e !important; animation: connectPulse 1s ease-in-out infinite; }
     #mermaidRender.connect-armed .node { cursor: crosshair !important; }
     #mermaidRender .actor, #mermaidRender .actor-man, #mermaidRender .messageText, #mermaidRender g.cluster { cursor: pointer; pointer-events: all; }
+    #mermaidRender g.process-note { cursor: grab; pointer-events: all; touch-action: none; }
+    #mermaidRender g.process-note text { user-select: none; pointer-events: none; }
     /* Mobile: 44px touch targets in the inspector, safe-area insets for floating bottom panels */
     #editorPanel { bottom: calc(3rem + env(safe-area-inset-bottom, 0px)); }
     #zoomControls { bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
@@ -136,6 +138,7 @@
         <button onclick="addLibraryNode('decision')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Decision Gate</button>
         <button onclick="addLibraryNode('buffer')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Buffer/WIP</button>
         <button id="btnConnectNodes" onclick="toggleConnectMode()" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">🔗 Connect Nodes</button>
+        <button id="btnAddNote" onclick="addNote()" title="Attach a note to the selected node" class="text-left px-2.5 py-1.5 bg-yellow-950/50 hover:bg-yellow-900/60 border border-yellow-700/50 rounded-md text-xs text-yellow-200 transition">📝 Add Note</button>
         <button onclick="deleteSelected()" class="text-left px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/60 rounded-md text-xs text-rose-200 transition">🗑️ Delete Selected</button>
       </div>
       <div id="zoomControls" class="absolute right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
@@ -155,8 +158,23 @@
             <button id="tabEdgeInspector" onclick="switchInspectorTab('edge')" class="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-slate-100 transition">
               <i data-lucide="spline" class="w-3.5 h-3.5"></i><span>Edge Inspector</span>
             </button>
+            <button id="tabNoteInspector" onclick="switchInspectorTab('note')" class="hidden flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded text-slate-400 hover:text-slate-100 transition">
+              <span>📝 Process Note</span>
+            </button>
           </div>
           <button onclick="closeInspector()" class="text-slate-400 hover:text-slate-200 p-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <div id="noteInspectorPanel" class="hidden p-4 space-y-4 overflow-y-auto flex-1 text-xs">
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Attached to Node</label>
+            <input type="text" id="inspectorNoteTarget" readonly class="w-full bg-slate-950 border border-slate-800 text-slate-400 rounded px-2.5 py-1.5 font-mono">
+          </div>
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-400 mb-1">Note Text</label>
+            <textarea id="inspectorNoteText" rows="6" maxlength="500" oninput="updateActiveNoteFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-yellow-500 resize-y" placeholder="Observation, root cause, action item..."></textarea>
+            <p class="text-[10px] text-slate-500 mt-1">Drag the yellow card on the canvas to reposition it. It follows its node.</p>
+          </div>
+          <button onclick="deleteActiveNote()" class="w-full px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/60 rounded-md text-rose-200 transition">🗑️ Delete Note</button>
         </div>
         <div id="edgeInspectorPanel" class="hidden p-4 space-y-4 overflow-y-auto flex-1 text-xs">
           <div>
@@ -248,6 +266,9 @@
             <input type="number" id="inspectorWIP" oninput="updateActiveNodeFromInspector()" class="w-full bg-slate-800 border border-slate-700 text-slate-100 rounded px-2.5 py-1.5 focus:ring-1 focus:ring-blue-500" min="0">
           </div>
           <div class="pt-2 border-t border-slate-800">
+            <button onclick="addNote()" class="w-full px-2.5 py-1.5 bg-yellow-950/50 hover:bg-yellow-900/60 border border-yellow-700/50 rounded-md text-yellow-200 transition">📝 Add Note</button>
+          </div>
+          <div class="pt-2 border-t border-slate-800">
             <label class="inspector-check flex items-center space-x-2 cursor-pointer">
               <input type="checkbox" id="inspectorFriction" onchange="updateActiveNodeFromInspector()" class="rounded bg-slate-800 border-slate-700 text-blue-600 focus:ring-blue-500">
               <span class="text-xs font-semibold text-rose-300">Flag as Friction / Bottleneck Point</span>
@@ -329,7 +350,7 @@
         metrics: {}
       }
     };
-    let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {}, positions: {} };
+    let projectState = { title: "RMA Process Current State", mermaid: "", metrics: {}, positions: {}, notes: {} };
 
     // Node drag offsets live in projectState.positions[nodeId]; older files stored them in metrics[nodeId].pos.
     function normalizePositions() {
@@ -344,11 +365,23 @@
         if (!isObj(p) || !Number.isFinite(Number(p.x)) || !Number.isFinite(Number(p.y))) delete pos[id];
         else pos[id] = { x: Number(p.x), y: Number(p.y) };
       });
+      normalizeNotes();
+    }
+
+    // Notes: { note_1: { targetId, text, offset: {x, y} } }; offset is the card's top-left relative to the target node centre.
+    function normalizeNotes() {
+      const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+      const notes = projectState.notes = isObj(projectState.notes) ? projectState.notes : {};
+      Object.entries(notes).forEach(([id, n]) => {
+        if (!isObj(n) || typeof n.targetId !== 'string' || !n.targetId) { delete notes[id]; return; }
+        const o = isObj(n.offset) ? n.offset : {};
+        notes[id] = { targetId: n.targetId, text: String(n.text ?? '').slice(0, 500), offset: { x: Number(o.x) || 0, y: Number(o.y) || 0 } };
+      });
     }
 
     // Switching projects must not leave an inspector or connect session pointing at the previous diagram.
     // Loading new content (template, file, URL, Clear) also schedules a metrics cleanup for the next render.
-    let pruneMetricsOnRender = false;
+    let pruneMetricsOnRender = false, activeNoteId = null;
     function resetInteractionState() { pruneMetricsOnRender = true; closeInspector(); if (connectArmed || connectSourceNodeId) disarmConnectMode(); }
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null, activeEdge = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
@@ -373,6 +406,8 @@
       mermaidRender.addEventListener('pointerdown', startNodeDrag, true);
       mermaidRender.addEventListener('click', (e) => {
         if (dragMoved) { dragMoved = false; return; }
+        const noteEl = e.target.closest('g.process-note');
+        if (noteEl && !connectArmed) { openNoteEditor(noteEl.dataset.noteId); return; }
         if (connectArmed) {
           const nodeEl = e.target.closest('.node, g.nodes > g');
           if (nodeEl) handleConnectClick(nodeEl);
@@ -401,7 +436,7 @@
           projectState.mermaid = selected.mermaid;
           projectState.metrics = JSON.parse(JSON.stringify(selected.metrics || {}));
           projectState.edges = {};
-          projectState.positions = {};
+          projectState.positions = {}; projectState.notes = {};
           mermaidCodeInput.value = selected.mermaid;
           resetInteractionState();
           updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
@@ -482,12 +517,14 @@
           injectGooeyFilter(svgElement);
           buildDiagramIndex(svgElement);
           pruneOrphanPositions();
+          if (pruneMetricsOnRender) pruneOrphanNotes();
           pruneOrphanMetrics();
           if (connectSourceNodeId) {
             const src = [...svgElement.querySelectorAll('g.node')].find(n => n.id.replace(/^flowchart-/, '').replace(/-\d+$/, '') === connectSourceNodeId);
             if (src) src.classList.add('connect-source'); else disarmConnectMode();
           }
           applyStoredPositions();
+          renderNotes();
           panZoomInstance = svgPanZoom(svgElement, { zoomEnabled: true, controlIconsEnabled: false, dblClickZoomEnabled: false, fit: true, center: true, minZoom: 0.2, maxZoom: 8, contain: false, viewportSelector: null });
           if (pan && zoom) { panZoomInstance.resize(); panZoomInstance.zoom(zoom); panZoomInstance.pan(pan); }
           else refitCanvas();
@@ -649,6 +686,8 @@
     function startNodeDrag(e) {
       dragMoved = false;
       if (e.pointerType === 'mouse' ? e.button !== 0 : !e.isPrimary) return;
+      const noteEl = e.target.closest?.('g.process-note');
+      if (noteEl) { startNoteDrag(e, noteEl); return; }
       const id = cleanNodeId(e.target);
       if (!id || !nodeIndex[id] || !nodeIndex[id].el.contains(e.target)) return;
       const el = nodeIndex[id].el;
@@ -656,6 +695,18 @@
       const p = svgPointFor(el.parentNode, e);
       if (!p) return;
       drag = { id, el, n: nodeIndex[id], parent: el.parentNode, start: p, x0: nodeIndex[id].x, y0: nodeIndex[id].y, sx: e.clientX, sy: e.clientY, active: false, pointerId: e.pointerId };
+      if (panZoomInstance) panZoomInstance.disablePan();
+      window.addEventListener('pointermove', onNodeDragMove);
+      window.addEventListener('pointerup', endNodeDrag);
+      window.addEventListener('pointercancel', endNodeDrag);
+      window.addEventListener('pointerdown', onExtraPointerDown, true);
+    }
+
+    function startNoteDrag(e, noteEl) {
+      const layer = noteEl.closest('#notesLayer'), note = projectState.notes?.[noteEl.dataset.noteId];
+      const p = layer && note && svgPointFor(layer, e);
+      if (!p) return;
+      drag = { kind: 'note', id: noteEl.dataset.noteId, el: noteEl, parent: layer, start: p, ox: note.offset.x, oy: note.offset.y, sx: e.clientX, sy: e.clientY, active: false, pointerId: e.pointerId };
       if (panZoomInstance) panZoomInstance.disablePan();
       window.addEventListener('pointermove', onNodeDragMove);
       window.addEventListener('pointerup', endNodeDrag);
@@ -674,10 +725,18 @@
       e.preventDefault();
       const p = svgPointFor(drag.parent, e);
       if (!p) return;
+      if (drag.kind === 'note') {
+        const note = projectState.notes?.[drag.id];
+        if (!note) return;
+        note.offset = { x: drag.ox + (p.x - drag.start.x), y: drag.oy + (p.y - drag.start.y) };
+        placeNote(drag.id);
+        return;
+      }
       const n = drag.n;
       n.x = drag.x0 + (p.x - drag.start.x); n.y = drag.y0 + (p.y - drag.start.y);
       n.el.setAttribute('transform', `translate(${n.x}, ${n.y})`);
       drawSockets(updateNodeConnections(drag.id), drag.parent);
+      updateNotesForNode(drag.id);
     }
 
     function endNodeDrag(e) {
@@ -686,7 +745,10 @@
       window.removeEventListener('pointerup', endNodeDrag);
       window.removeEventListener('pointercancel', endNodeDrag);
       window.removeEventListener('pointerdown', onExtraPointerDown, true);
-      if (drag.active) {
+      if (drag.active && drag.kind === 'note') {
+        const note = projectState.notes?.[drag.id];
+        if (note) note.offset = { x: Math.round(note.offset.x), y: Math.round(note.offset.y) };
+      } else if (drag.active) {
         projectState.positions = projectState.positions || {};
         const pos = { x: Math.round((drag.n.x - drag.n.baseX) * 10) / 10, y: Math.round((drag.n.y - drag.n.baseY) * 10) / 10 };
         if (pos.x || pos.y) projectState.positions[drag.id] = pos; else delete projectState.positions[drag.id];
@@ -695,6 +757,176 @@
       if (socketLayer) { socketLayer.remove(); socketLayer = null; }
       if (panZoomInstance) panZoomInstance.enablePan();
       drag = null;
+    }
+
+    // ---- Process Notes: yellow cards attached to nodes, drawn in #notesLayer so they pan/zoom/export with the diagram ----
+    const NOTE_W = 190, NOTE_HEAD = 22, NOTE_PAD = 8, NOTE_LINE = 15;
+    const noteMeasure = document.createElement('canvas').getContext('2d');
+
+    function wrapNoteText(text, maxW) {
+      noteMeasure.font = '12px sans-serif';
+      const lines = [];
+      String(text).split('\n').forEach(par => {
+        let line = '';
+        const push = w => { if (noteMeasure.measureText(line ? line + ' ' + w : w).width <= maxW) line = line ? line + ' ' + w : w; else { if (line) lines.push(line); line = w; } };
+        par.split(' ').forEach(word => {
+          if (noteMeasure.measureText(word).width <= maxW) { push(word); return; }
+          // Words wider than the card are broken by character.
+          let chunk = '';
+          for (const ch of word) { if (noteMeasure.measureText(chunk + ch).width > maxW && chunk) { push(chunk); if (line) { lines.push(line); line = ''; } chunk = ''; } chunk += ch; }
+          if (chunk) push(chunk);
+        });
+        lines.push(line);
+      });
+      return lines;
+    }
+
+    function getNotesLayer(create) {
+      let layer = mermaidRender.querySelector('#notesLayer');
+      if (layer || !create) return layer;
+      const svg = mermaidRender.querySelector('svg');
+      if (!svg) return null;
+      const host = [...svg.children].find(c => c.tagName.toLowerCase() === 'g' && c.querySelector('.node')) || svg;
+      layer = document.createElementNS(SVG_NS, 'g');
+      layer.setAttribute('id', 'notesLayer');
+      layer.innerHTML = '<g class="note-links"></g><g class="note-cards"></g>';
+      host.appendChild(layer);
+      return layer;
+    }
+
+    // Target node centre and half-size in notesLayer coordinates.
+    function noteTargetGeom(layer, targetId) {
+      const n = nodeIndex[targetId];
+      const lm = layer.getCTM(), nm = n?.el.getCTM();
+      if (!lm || !nm) return null;
+      const m = lm.inverse().multiply(nm);
+      const c = new DOMPoint(n.box.x + n.box.width / 2, n.box.y + n.box.height / 2).matrixTransform(m);
+      return { cx: c.x, cy: c.y, hw: n.box.width / 2 * Math.abs(m.a), hh: n.box.height / 2 * Math.abs(m.d) };
+    }
+
+    function buildNoteCard(id, note) {
+      const lines = wrapNoteText(note.text, NOTE_W - NOTE_PAD * 2);
+      const h = NOTE_HEAD + NOTE_PAD + lines.length * NOTE_LINE + NOTE_PAD / 2;
+      const g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('class', 'process-note'); g.dataset.noteId = id; g.dataset.w = NOTE_W; g.dataset.h = h;
+      const mk = (tag, attrs, text) => {
+        const el = document.createElementNS(SVG_NS, tag);
+        Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+        if (text !== undefined) el.textContent = text;
+        g.appendChild(el); return el;
+      };
+      mk('rect', { width: NOTE_W, height: h, rx: 6, fill: '#422006', stroke: '#fde047', 'stroke-width': 1.5 });
+      mk('rect', { width: NOTE_W, height: NOTE_HEAD, rx: 6, fill: '#713f12', stroke: 'none' });
+      mk('rect', { y: NOTE_HEAD - 6, width: NOTE_W, height: 6, fill: '#713f12', stroke: 'none' });
+      mk('text', { x: NOTE_PAD, y: 15, fill: '#ca8a04', 'font-weight': 'bold', 'font-size': 11, 'font-family': 'sans-serif' }, 'Process Note');
+      const t = mk('text', { x: NOTE_PAD, y: NOTE_HEAD + NOTE_PAD + 10, fill: '#fef9c3', 'font-size': 12, 'font-family': 'sans-serif' });
+      lines.forEach((ln, i) => {
+        const ts = document.createElementNS(SVG_NS, 'tspan');
+        ts.setAttribute('x', NOTE_PAD); ts.setAttribute('dy', i ? NOTE_LINE : 0);
+        ts.setAttribute('xml:space', 'preserve');
+        ts.textContent = ln || ' ';
+        t.appendChild(ts);
+      });
+      const sel = mk('rect', { class: 'note-sel', x: -3, y: -3, width: NOTE_W + 6, height: h + 6, rx: 8, fill: 'none', stroke: '#facc15', 'stroke-width': 2, 'stroke-dasharray': '4,3' });
+      sel.style.display = id === activeNoteId ? '' : 'none';
+      return g;
+    }
+
+    // Positions one card and redraws its dashed connector (from the node's edge toward the card centre).
+    function placeNote(id) {
+      const layer = getNotesLayer(false), note = projectState.notes?.[id];
+      const card = layer?.querySelector(`g.process-note[data-note-id="${CSS.escape(id)}"]`), link = layer?.querySelector(`line[data-note-id="${CSS.escape(id)}"]`);
+      if (!card || !note) return;
+      const geo = noteTargetGeom(layer, note.targetId);
+      if (!geo) return;
+      const x = geo.cx + note.offset.x, y = geo.cy + note.offset.y, w = Number(card.dataset.w), h = Number(card.dataset.h);
+      card.setAttribute('transform', `translate(${x}, ${y})`);
+      const dx = x + w / 2 - geo.cx, dy = y + h / 2 - geo.cy;
+      const t = Math.min(dx ? geo.hw / Math.abs(dx) : Infinity, dy ? geo.hh / Math.abs(dy) : Infinity);
+      const k = Number.isFinite(t) && t < 1 ? t : 0;
+      link.setAttribute('x1', geo.cx + dx * k); link.setAttribute('y1', geo.cy + dy * k);
+      link.setAttribute('x2', x + w / 2); link.setAttribute('y2', y + h / 2);
+    }
+
+    function renderNotes() {
+      const notes = projectState.notes || {};
+      const ids = Object.keys(notes).filter(id => nodeIndex[notes[id].targetId]);
+      const layer = getNotesLayer(ids.length > 0);
+      if (!layer) return;
+      const links = layer.querySelector('.note-links'), cards = layer.querySelector('.note-cards');
+      links.replaceChildren(); cards.replaceChildren();
+      ids.forEach(id => {
+        const link = document.createElementNS(SVG_NS, 'line');
+        link.dataset.noteId = id;
+        link.setAttribute('stroke', '#eab308'); link.setAttribute('stroke-width', 2); link.setAttribute('stroke-dasharray', '8,6');
+        link.setAttribute('pointer-events', 'none');
+        links.appendChild(link);
+        cards.appendChild(buildNoteCard(id, notes[id]));
+        placeNote(id);
+      });
+    }
+
+    function updateNotesForNode(nodeId) {
+      Object.entries(projectState.notes || {}).forEach(([id, n]) => { if (n.targetId === nodeId) placeNote(id); });
+    }
+
+    // Removes notes whose target node no longer exists. Skipped for diagrams without a node index (sequence).
+    function pruneOrphanNotes() {
+      const notes = projectState.notes;
+      if (!notes || !Object.keys(nodeIndex).length) return;
+      Object.keys(notes).forEach(id => { if (!nodeIndex[notes[id].targetId]) delete notes[id]; });
+      if (activeNoteId && !notes[activeNoteId]) { setActiveNote(null); }
+    }
+
+    function setActiveNote(id) {
+      activeNoteId = id;
+      mermaidRender.querySelectorAll('g.process-note').forEach(g => {
+        const sel = g.querySelector('.note-sel');
+        if (sel) sel.style.display = g.dataset.noteId === id ? '' : 'none';
+      });
+    }
+
+    function addNote() {
+      if (!activeNodeId || !nodeIndex[activeNodeId]) { updateStatus('Select a flowchart or state node first, then click Add Note', 'amber'); return; }
+      const layer = getNotesLayer(true);
+      const geo = layer && noteTargetGeom(layer, activeNodeId);
+      if (!geo) { updateStatus('Notes could not be placed on this diagram', 'rose'); return; }
+      projectState.notes = projectState.notes || {};
+      let i = 1;
+      while (projectState.notes['note_' + i]) i++;
+      const existing = Object.values(projectState.notes).filter(n => n.targetId === activeNodeId).length;
+      projectState.notes['note_' + i] = { targetId: activeNodeId, text: '', offset: { x: Math.round(geo.hw + 40), y: Math.round(-geo.hh - 80 - existing * 40) } };
+      openNoteEditor('note_' + i);
+      updateStatus('Note added: type in the inspector, drag the card to move it', 'emerald');
+    }
+
+    function openNoteEditor(id) {
+      const note = projectState.notes?.[id];
+      if (!note) return;
+      activeNodeId = null; activeEdge = null;
+      activeNoteId = id;
+      renderNotes(); setActiveNote(id);
+      document.getElementById('inspectorNoteTarget').value = note.targetId;
+      const ta = document.getElementById('inspectorNoteText');
+      ta.value = note.text;
+      switchInspectorTab('note');
+      inspectorDrawer.classList.remove('hidden');
+      ta.focus();
+    }
+
+    function updateActiveNoteFromInspector() {
+      const note = projectState.notes?.[activeNoteId];
+      if (!note) return;
+      note.text = document.getElementById('inspectorNoteText').value.slice(0, 500);
+      renderNotes(); setActiveNote(activeNoteId);
+    }
+
+    function deleteActiveNote() {
+      if (!activeNoteId) return;
+      delete projectState.notes[activeNoteId];
+      closeInspector();
+      renderNotes();
+      updateStatus('Note deleted', 'emerald');
     }
 
     // ---- Phase 7: Object Library and delete handler ----
@@ -823,14 +1055,19 @@
       return edge ? removeLinesAt(code, [edge.start]) : null;
     }
 
-    async function deleteSelected() {
+    function deleteSelected() {
+      if (activeNoteId) { deleteActiveNote(); return; }
+      return deleteSelectedNodeOrEdge();
+    }
+
+    async function deleteSelectedNodeOrEdge() {
       const code = mermaidCodeInput.value, kind = diagramKind(code);
       if (!activeEdge && !activeNodeId) { updateStatus('Select a node or connection first', 'amber'); return; }
       const nodeId = activeNodeId, edgeRef = activeEdge;
       const next = edgeRef ? deleteEdgeFromCode(code, kind, edgeRef) : deleteNodeFromCode(code, kind, nodeId);
       if (next === null || next === code) { updateStatus('Nothing to delete for this selection (subgraphs are not deletable)', 'amber'); return; }
       mermaidCodeInput.value = projectState.mermaid = next;
-      if (nodeId) { delete projectState.metrics[nodeId]; if (projectState.positions) delete projectState.positions[nodeId]; }
+      if (nodeId) { delete projectState.metrics[nodeId]; if (projectState.positions) delete projectState.positions[nodeId]; Object.entries(projectState.notes || {}).forEach(([k, n]) => { if (n.targetId === nodeId) delete projectState.notes[k]; }); }
       if (edgeRef && projectState.edges) delete projectState.edges[edgeKey(edgeRef)];
       closeInspector();
       updateLineNumbers(); calculateVSMMetrics();
@@ -838,7 +1075,7 @@
     }
 
     function openInspector(nodeId) {
-      activeEdge = null;
+      activeEdge = null; setActiveNote(null);
       activeNodeId = nodeId; document.getElementById('inspectorNodeId').value = nodeId;
       if (!projectState.metrics[nodeId]) { projectState.metrics[nodeId] = { title: nodeId, owner: '', ct: 0, co: 0, wip: 0, friction: false }; }
       const m = projectState.metrics[nodeId];
@@ -913,14 +1150,16 @@
       if (edge) showEdgeInspector(edge);
     }
 
-    function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; activeEdge = null; }
+    function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; activeEdge = null; setActiveNote(null); }
 
     function switchInspectorTab(tab) {
-      const isEdge = tab === 'edge';
-      document.getElementById('nodeInspectorPanel').classList.toggle('hidden', isEdge);
+      const isEdge = tab === 'edge', isNote = tab === 'note';
+      document.getElementById('nodeInspectorPanel').classList.toggle('hidden', isEdge || isNote);
       document.getElementById('edgeInspectorPanel').classList.toggle('hidden', !isEdge);
+      document.getElementById('noteInspectorPanel').classList.toggle('hidden', !isNote);
+      document.getElementById('tabNoteInspector').classList.toggle('hidden', !isNote);
       const active = ['bg-blue-600', 'text-white', 'shadow'], inactive = ['text-slate-400', 'hover:text-slate-100'];
-      [['tabNodeInspector', !isEdge], ['tabEdgeInspector', isEdge]].forEach(([id, on]) => {
+      [['tabNodeInspector', !isEdge && !isNote], ['tabEdgeInspector', isEdge], ['tabNoteInspector', isNote]].forEach(([id, on]) => {
         const btn = document.getElementById(id);
         btn.classList.remove(...(on ? inactive : active));
         btn.classList.add(...(on ? active : inactive));
@@ -1098,7 +1337,7 @@
     }
 
     function showEdgeInspector(edge) {
-      activeNodeId = null;
+      activeNodeId = null; setActiveNote(null);
       activeEdge = { kind: edge.kind || 'flow', src: edge.src, tgt: edge.tgt, idx: edge.idx, ord: edge.ord };
       document.getElementById('inspectorEdgeId').value = edgeKey(edge);
       document.getElementById('inspectorEdgeLabel').value = edge.label;
@@ -1418,7 +1657,7 @@
               mermaidCodeInput.value = parsed.mermaid;
             }
           } catch(err) { alert('Invalid project JSON file.'); }
-        } else { projectState.mermaid = content; projectState.positions = {}; mermaidCodeInput.value = content; }
+        } else { projectState.mermaid = content; projectState.positions = {}; projectState.notes = {}; mermaidCodeInput.value = content; }
         resetInteractionState();
         updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
       };
@@ -1427,6 +1666,7 @@
 
     function saveProjectJSON() {
       projectState.mermaid = mermaidCodeInput.value;
+      pruneOrphanNotes();
       const jsonStr = JSON.stringify(projectState, null, 2);
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -1472,7 +1712,7 @@
     function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
     function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
     function resetZoom() { if (panZoomInstance) { panZoomInstance.resetZoom(); panZoomInstance.fit(); panZoomInstance.center(); } }
-    function clearCode() { mermaidCodeInput.value = ''; projectState.positions = {}; projectState.metrics = {}; resetInteractionState(); updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
+    function clearCode() { mermaidCodeInput.value = ''; projectState.positions = {}; projectState.notes = {}; projectState.metrics = {}; resetInteractionState(); updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
     function formatCode() { mermaidCodeInput.value = mermaidCodeInput.value.split('\n').map(l => l.trimEnd()).join('\n'); updateLineNumbers(); }
     const EXPORT_STYLE_PROPS = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'opacity', 'font-family', 'font-size', 'font-weight', 'font-style', 'color', 'background-color', 'text-anchor', 'dominant-baseline', 'text-align', 'line-height', 'display', 'padding', 'white-space', 'overflow', 'visibility', 'filter'];
     function exportBaseName() {
@@ -1526,7 +1766,7 @@
         dst.setAttribute('style', css);
       });
       addForeignObjectTextFallback(svg, clone);
-      clone.querySelectorAll('.edge-hit, .anchor-socket, [id^="gooey"]').forEach(el => el.remove());
+      clone.querySelectorAll('.edge-hit, .anchor-socket, .note-sel, [id^="gooey"]').forEach(el => el.remove());
       const vp = clone.querySelector('g.svg-pan-zoom_viewport');
       if (vp) vp.removeAttribute('transform'), vp.removeAttribute('style');
       clone.querySelectorAll('.svg-pan-zoom-control').forEach(el => el.remove());
