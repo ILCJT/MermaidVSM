@@ -38,10 +38,12 @@
     #mermaidRender g.process-note { cursor: grab; pointer-events: all; touch-action: none; }
     #mermaidRender g.process-note text { user-select: none; pointer-events: none; }
     /* Mobile: 44px touch targets in the inspector, safe-area insets for floating bottom panels */
-    #editorPanel { bottom: calc(3rem + env(safe-area-inset-bottom, 0px)); }
-    #zoomControls { bottom: calc(4rem + env(safe-area-inset-bottom, 0px)); }
+    /* --ladder-h is kept in sync with the summary bar's real height (it wraps on narrow screens) so floating panels always sit above it */
+    #editorPanel { bottom: calc(var(--ladder-h, 2.75rem) + 0.5rem + env(safe-area-inset-bottom, 0px)); }
+    #zoomControls { bottom: calc(var(--ladder-h, 2.75rem) + 0.75rem + env(safe-area-inset-bottom, 0px)); }
     #vsmSummaryLadder { padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px)); }
-    #inspectorDrawer { max-width: calc(100vw - 1.5rem); }
+    #inspectorDrawer { max-width: calc(100vw - 1.5rem); max-height: calc(100% - 9.5rem); }
+    @media (max-height: 700px) { #editorBody { height: 200px; } }
     @media (pointer: coarse) {
       header button, header select, header label, #objectLibrary button, #editorPanel button, #zoomControls button { min-height: 44px; }
       #zoomControls button, #editorPanel button { min-width: 44px; }
@@ -49,7 +51,8 @@
     }
     @media (max-width: 767px) {
       #inspectorDrawer button, #inspectorDrawer select, #inspectorDrawer input:not([type="checkbox"]) { min-height: 44px; }
-      #inspectorDrawer { left: 0.75rem; right: 0.75rem; top: auto; bottom: calc(3rem + env(safe-area-inset-bottom, 0px)); width: auto; max-height: 55vh; z-index: 40; }
+      #inspectorDrawer { left: 0.75rem; right: 0.75rem; top: auto; bottom: calc(var(--ladder-h, 2.75rem) + 3.25rem + env(safe-area-inset-bottom, 0px)); width: auto; max-height: calc(100% - var(--ladder-h, 2.75rem) - 7.75rem); z-index: 40; }
+      #zoomControls { top: 0.75rem; bottom: auto; right: 0.75rem; }
       #inspectorDrawer label.inspector-check { min-height: 44px; display: flex; align-items: center; }
       #inspectorDrawer input[type="checkbox"] { width: 1.5rem; height: 1.5rem; }
     }
@@ -104,7 +107,7 @@
   </header>
   <main id="dropZone" class="flex-1 flex relative overflow-hidden">
     <section id="editorPanel" class="absolute bottom-12 left-3 w-80 sm:w-96 max-h-[320px] bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all overflow-hidden">
-      <div class="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0 h-9">
+      <div id="editorHeader" onclick="if (!event.target.closest('button')) toggleEditorPanel()" class="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0 h-9 cursor-pointer select-none">
         <span class="font-mono text-[11px] text-slate-400 flex items-center gap-1.5"><i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-500"></i> diagram.mmd</span>
         <div class="flex items-center space-x-2">
           <button id="editorToggleBtn" onclick="toggleEditorPanel()" title="Collapse / expand editor" class="hover:text-slate-200 transition flex items-center"><i data-lucide="chevron-down" class="w-4 h-4"></i></button>
@@ -132,14 +135,19 @@
           <button onclick="dismissError()" class="text-rose-400 hover:text-rose-200 p-0.5"><i data-lucide="x" class="w-4 h-4"></i></button>
         </div>
       </div>
-      <div id="objectLibrary" class="absolute top-3 left-3 w-44 bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 backdrop-blur-md p-2 flex flex-col gap-1.5">
-        <div class="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Object Library</div>
+      <div id="objectLibrary" class="absolute top-3 left-3 w-44 bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 backdrop-blur-md p-2 flex flex-col gap-1.5 overflow-y-auto" style="max-height: calc(100vh - 320px);">
+        <div id="libraryHeader" onclick="toggleObjectLibrary()" class="px-1 flex items-center justify-between cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <span>Object Library</span>
+          <button id="libraryToggleBtn" aria-expanded="true" title="Collapse / expand library" class="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 hover:text-slate-200 text-sm leading-none normal-case">−</button>
+        </div>
+        <div id="libraryBody" class="flex flex-col gap-1.5">
         <button onclick="addLibraryNode('process')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Process Box</button>
         <button onclick="addLibraryNode('decision')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Decision Gate</button>
         <button onclick="addLibraryNode('buffer')" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">+ Buffer/WIP</button>
         <button id="btnConnectNodes" onclick="toggleConnectMode()" class="text-left px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-xs text-slate-200 transition">🔗 Connect Nodes</button>
         <button id="btnAddNote" onclick="addNote()" title="Attach a note to the selected node" class="text-left px-2.5 py-1.5 bg-yellow-950/50 hover:bg-yellow-900/60 border border-yellow-700/50 rounded-md text-xs text-yellow-200 transition">📝 Add Note</button>
         <button onclick="deleteSelected()" class="text-left px-2.5 py-1.5 bg-rose-950/60 hover:bg-rose-900/70 border border-rose-800/60 rounded-md text-xs text-rose-200 transition">🗑️ Delete Selected</button>
+        </div>
       </div>
       <div id="zoomControls" class="absolute right-3 flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 space-x-1 z-20 backdrop-blur-sm shadow-md">
         <button onclick="zoomIn()" class="p-1.5 hover:bg-slate-800 rounded text-slate-300 hover:text-white transition" title="Zoom In"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
@@ -1153,6 +1161,7 @@
     function closeInspector() { inspectorDrawer.classList.add('hidden'); activeNodeId = null; activeEdge = null; setActiveNote(null); }
 
     function switchInspectorTab(tab) {
+      if (mobileMQ.matches) { setEditorCollapsed(true); setLibraryCollapsed(true); }
       const isEdge = tab === 'edge', isNote = tab === 'note';
       document.getElementById('nodeInspectorPanel').classList.toggle('hidden', isEdge || isNote);
       document.getElementById('edgeInspectorPanel').classList.toggle('hidden', !isEdge);
@@ -1689,12 +1698,23 @@
     function toggleEditorPanel() {
       const body = document.getElementById('editorBody');
       const collapsed = body.classList.toggle('hidden');
+      // On phones the inspector docks in the same strip, so only one of the two is open at a time.
+      if (!collapsed && mobileMQ.matches) closeInspector();
       const btn = document.getElementById('editorToggleBtn');
       btn.innerHTML = `<i data-lucide="${collapsed ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4"></i>`;
       lucide.createIcons();
       if (panZoomInstance) panZoomInstance.resize();
     }
-    // Below 768px the editor starts collapsed (header bar only) so the canvas is full-bleed
+    function setLibraryCollapsed(collapsed) {
+      document.getElementById('libraryBody').classList.toggle('hidden', collapsed);
+      const btn = document.getElementById('libraryToggleBtn');
+      btn.textContent = collapsed ? '+' : '−';
+      btn.setAttribute('aria-expanded', String(!collapsed));
+    }
+    function toggleObjectLibrary() {
+      setLibraryCollapsed(!document.getElementById('libraryBody').classList.contains('hidden'));
+    }
+    // The editor starts collapsed (header bar only) at every width so the canvas is full-bleed; the library also starts collapsed below 768px.
     const mobileMQ = window.matchMedia('(max-width: 767px)');
     function setEditorCollapsed(collapsed) {
       const body = document.getElementById('editorBody');
@@ -1702,10 +1722,15 @@
       toggleEditorPanel();
     }
     function applyMobileCollapse() {
-      setEditorCollapsed(mobileMQ.matches);
-      document.getElementById('objectLibrary').classList.toggle('w-44', !mobileMQ.matches);
+      setEditorCollapsed(true);
+      setLibraryCollapsed(mobileMQ.matches);
+      const ladder = document.getElementById('vsmSummaryLadder');
+      const syncLadder = () => document.documentElement.style.setProperty('--ladder-h', ladder.offsetHeight + 'px');
+      syncLadder();
+      new ResizeObserver(syncLadder).observe(ladder);
     }
-    mobileMQ.addEventListener('change', () => { applyMobileCollapse(); setTimeout(refitCanvas, 50); });
+    // Crossing the breakpoint only collapses (never force-expands panels the user may have closed).
+    mobileMQ.addEventListener('change', () => { if (mobileMQ.matches) { setEditorCollapsed(true); setLibraryCollapsed(true); } setTimeout(refitCanvas, 50); });
     let resizeTimer;
     window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(refitCanvas, 100); });
 
