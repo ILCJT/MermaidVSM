@@ -477,6 +477,7 @@
           addEdgeHitPaths(svgElement);
           injectGooeyFilter(svgElement);
           buildDiagramIndex(svgElement);
+          pruneOrphanPositions();
           if (connectSourceNodeId) {
             const src = [...svgElement.querySelectorAll('g.node')].find(n => n.id.replace(/^flowchart-/, '').replace(/-\d+$/, '') === connectSourceNodeId);
             if (src) src.classList.add('connect-source'); else disarmConnectMode();
@@ -542,6 +543,13 @@
         if (!src || !tgt) return;
         edgeIndex.push({ path, src, tgt, hits: hits.filter(h => h.dataset.edgeFor === path.id), label: labels.length === paths.length ? labels[i] : null });
       });
+    }
+
+    // Drops offsets for nodes that no longer exist. Skipped when no index was built (sequence diagrams, failed layouts) so nothing is lost by accident.
+    function pruneOrphanPositions() {
+      const pos = projectState.positions;
+      if (!pos || !Object.keys(nodeIndex).length) return;
+      Object.keys(pos).forEach(id => { if (!nodeIndex[id]) delete pos[id]; });
     }
 
     function applyStoredPositions() {
@@ -1455,6 +1463,38 @@
       const t = (projectState.title || 'mermaid-studio').toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
       return `${t || 'mermaid-studio'}.vsm`;
     }
+    // Wraps each HTML label in <switch>: viewers that support foreignObject use it, others (Inkscape, Illustrator, some converters) fall back to plain SVG <text>.
+    function addForeignObjectTextFallback(liveSvg, cloneSvg) {
+      const live = [...liveSvg.querySelectorAll('foreignObject')];
+      [...cloneSvg.querySelectorAll('foreignObject')].forEach((fo, i) => {
+        const inner = live[i]?.firstElementChild;
+        if (!inner) return;
+        const lines = (inner.innerText || inner.textContent || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+        if (!lines.length) return;
+        const cs = getComputedStyle(inner);
+        const size = parseFloat(cs.fontSize) || 14, lh = size * 1.2;
+        const num = a => parseFloat(fo.getAttribute(a)) || 0;
+        const x = num('x') + num('width') / 2;
+        const y0 = num('y') + num('height') / 2 - (lines.length - 1) * lh / 2;
+        const text = document.createElementNS(SVG_NS, 'text');
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('dominant-baseline', 'central');
+        text.setAttribute('fill', cs.color);
+        text.setAttribute('font-family', cs.fontFamily);
+        text.setAttribute('font-size', size);
+        text.setAttribute('font-weight', cs.fontWeight);
+        lines.forEach((line, n) => {
+          const t = document.createElementNS(SVG_NS, 'tspan');
+          t.setAttribute('x', x); t.setAttribute('y', y0 + n * lh);
+          t.textContent = line;
+          text.appendChild(t);
+        });
+        const sw = document.createElementNS(SVG_NS, 'switch');
+        fo.setAttribute('requiredExtensions', 'http://www.w3.org/1999/xhtml');
+        fo.parentNode.replaceChild(sw, fo);
+        sw.append(fo, text);
+      });
+    }
     // Clone the live SVG with computed styles inlined, pan/zoom reset and namespaces set so it renders standalone.
     function buildStandaloneSVG() {
       const svg = mermaidRender.querySelector('svg');
@@ -1469,6 +1509,7 @@
         EXPORT_STYLE_PROPS.forEach(p => { const v = cs.getPropertyValue(p); if (v) css += `;${p}:${v}`; });
         dst.setAttribute('style', css);
       });
+      addForeignObjectTextFallback(svg, clone);
       clone.querySelectorAll('.edge-hit, .anchor-socket, [id^="gooey"]').forEach(el => el.remove());
       const vp = clone.querySelector('g.svg-pan-zoom_viewport');
       if (vp) vp.removeAttribute('transform'), vp.removeAttribute('style');

@@ -9,6 +9,7 @@
 * [x] **Phase 6 (Gemini VSM Skill):** `docs/VSM_BUILDER_SKILL.md` documents the `.vsm.json` generation schema.
 * [x] **Phase 7 (Interactive Canvas HUD):** Canvas-first floating layout, node dragging with elastic Bezier routing and gooey anchors, Object Library (add / connect / delete), dual-tab Node/Edge inspector, shape selector, top-rim VSM process icon badges (`data-icon`), bottom metric sub-pills, friction class sync across templates, and `?state=` Base64 URL hydration.
 * [x] **Mobile Responsive HUDs:** Under 768px the editor starts collapsed and the inspector docks as a bottom sheet; inspector controls are at least 44px tall; bottom panels add `env(safe-area-inset-bottom)` (`viewport-fit=cover`).
+* [x] **Export Hygiene:** after each render `pruneOrphanPositions()` removes offsets for nodes that no longer exist. SVG exports wrap every HTML label in `<switch>` with a plain SVG `<text>` fallback for viewers without `foreignObject` support.
 
 ## Known Limitations
 * Dragging, Library adds and Connect Nodes support flowcharts (state diagrams are draggable); sequence actors are not draggable.
