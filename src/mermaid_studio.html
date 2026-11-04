@@ -54,7 +54,7 @@
   </style>
 </head>
 <body class="h-full flex flex-col text-slate-100 overflow-hidden font-sans">
-  <header class="bg-slate-900 border-b border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-20 shrink-0">
+  <header class="bg-slate-900 border-b border-slate-800 px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-50 shrink-0">
     <div class="flex items-center space-x-2">
       <div class="bg-blue-600 p-1.5 rounded-lg flex items-center justify-center text-white"><i data-lucide="code-2" class="w-5 h-5"></i></div>
       <div>
@@ -79,24 +79,25 @@
         </optgroup>
       </select>
     </div>
-    <div class="flex items-center space-x-1.5">
+    <div class="flex items-center space-x-1.5 ml-auto">
       <label class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-200 text-xs font-medium flex items-center space-x-1 cursor-pointer transition">
         <i data-lucide="folder-open" class="w-3.5 h-3.5 text-amber-400"></i>
         <span class="hidden sm:inline">Open</span>
         <input type="file" id="fileInput" accept=".vsm.json,.json,.mmd" class="hidden" onchange="handleFileSelect(event)">
       </label>
-      <button onclick="saveProjectJSON()" title="Save Project (.vsm.json)" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-200 text-xs font-medium flex items-center space-x-1 transition">
-        <i data-lucide="save" class="w-3.5 h-3.5 text-emerald-400"></i>
-        <span class="hidden sm:inline">Project</span>
-      </button>
-      <button onclick="exportSVG()" title="Export SVG" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-200 text-xs font-medium flex items-center space-x-1 transition">
-        <i data-lucide="file-code-2" class="w-3.5 h-3.5 text-blue-400"></i>
-        <span class="sm:hidden">SVG</span><span class="hidden sm:inline">📐 Export SVG</span>
-      </button>
-      <button onclick="exportPNG()" title="Export PNG" class="px-2 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-white text-xs font-medium flex items-center space-x-1 shadow transition">
-        <i data-lucide="image" class="w-3.5 h-3.5"></i>
-        <span class="sm:hidden">PNG</span><span class="hidden sm:inline">📷 Export PNG</span>
-      </button>
+      <div class="relative" id="saveMenuWrap">
+        <button id="saveMenuBtn" onclick="toggleSaveMenu(event)" aria-haspopup="menu" aria-expanded="false" title="Save the diagram as an image" class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-white text-xs font-medium flex items-center space-x-1 shadow transition">
+          <i data-lucide="image" class="w-3.5 h-3.5"></i>
+          <span>Save Image</span>
+          <i data-lucide="chevron-down" class="w-3 h-3"></i>
+        </button>
+        <div id="saveMenu" role="menu" class="hidden absolute right-0 mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 py-1 text-xs text-slate-200">
+          <button role="menuitem" onclick="closeSaveMenu(); exportPNG()" class="w-full text-left px-3 py-2 hover:bg-slate-800 transition">📷 Export PNG</button>
+          <button role="menuitem" onclick="closeSaveMenu(); exportSVG()" class="w-full text-left px-3 py-2 hover:bg-slate-800 transition">📐 Export SVG</button>
+          <div class="border-t border-slate-800 my-1"></div>
+          <button role="menuitem" onclick="closeSaveMenu(); saveProjectJSON()" class="w-full text-left px-3 py-2 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition">💾 Project file (.vsm.json)</button>
+        </div>
+      </div>
     </div>
   </header>
   <main id="dropZone" class="flex-1 flex relative overflow-hidden">
@@ -106,8 +107,9 @@
         <div class="flex items-center space-x-2">
           <button id="editorToggleBtn" onclick="toggleEditorPanel()" title="Collapse / expand editor" class="hover:text-slate-200 transition flex items-center"><i data-lucide="chevron-down" class="w-4 h-4"></i></button>
           <button onclick="renderDiagram()" class="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded font-semibold text-[11px] flex items-center gap-1 shadow transition"><i data-lucide="play" class="w-3 h-3 fill-current"></i> Render</button>
-          <button onclick="formatCode()" class="hover:text-slate-200 transition flex items-center gap-1 ml-1"><i data-lucide="align-left" class="w-3 h-3"></i> Format</button>
-          <button onclick="clearCode()" class="hover:text-rose-400 transition flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Clear</button>
+          <button id="copyCodeBtn" onclick="copyCode()" title="Copy Mermaid code" class="hover:text-slate-200 transition flex items-center gap-1"><i data-lucide="copy" class="w-3 h-3"></i> Copy Code</button>
+          <button onclick="formatCode()" title="Format" class="hover:text-slate-200 transition flex items-center gap-1 ml-1"><i data-lucide="align-left" class="w-3 h-3"></i><span class="hidden sm:inline"> Format</span></button>
+          <button onclick="clearCode()" title="Clear" class="hover:text-rose-400 transition flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i><span class="hidden sm:inline"> Clear</span></button>
         </div>
       </div>
       <div id="editorBody" class="h-[280px] relative overflow-hidden flex">
@@ -345,7 +347,9 @@
     }
 
     // Switching projects must not leave an inspector or connect session pointing at the previous diagram.
-    function resetInteractionState() { closeInspector(); if (connectArmed || connectSourceNodeId) disarmConnectMode(); }
+    // Loading new content (template, file, URL, Clear) also schedules a metrics cleanup for the next render.
+    let pruneMetricsOnRender = false;
+    function resetInteractionState() { pruneMetricsOnRender = true; closeInspector(); if (connectArmed || connectSourceNodeId) disarmConnectMode(); }
     let panZoomInstance = null, renderTimeout = null, activeNodeId = null, activeEdge = null;
     const mermaidCodeInput = document.getElementById('mermaidCode');
     const mermaidRender = document.getElementById('mermaidRender');
@@ -399,7 +403,7 @@
           projectState.edges = {};
           projectState.positions = {};
           mermaidCodeInput.value = selected.mermaid;
-          closeInspector();
+          resetInteractionState();
           updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
         }
       });
@@ -478,6 +482,7 @@
           injectGooeyFilter(svgElement);
           buildDiagramIndex(svgElement);
           pruneOrphanPositions();
+          pruneOrphanMetrics();
           if (connectSourceNodeId) {
             const src = [...svgElement.querySelectorAll('g.node')].find(n => n.id.replace(/^flowchart-/, '').replace(/-\d+$/, '') === connectSourceNodeId);
             if (src) src.classList.add('connect-source'); else disarmConnectMode();
@@ -550,6 +555,17 @@
       const pos = projectState.positions;
       if (!pos || !Object.keys(nodeIndex).length) return;
       Object.keys(pos).forEach(id => { if (!nodeIndex[id]) delete pos[id]; });
+    }
+
+    // After a load, keeps only metrics for node IDs that exist in the rendered diagram (drops stale NewNode defaults and template leftovers).
+    // Skipped for diagrams without a node index (sequence) and for ordinary typing edits, so metrics are never lost mid-edit.
+    function pruneOrphanMetrics() {
+      if (!pruneMetricsOnRender) return;
+      pruneMetricsOnRender = false;
+      const metrics = projectState.metrics;
+      if (!metrics || !Object.keys(nodeIndex).length) return;
+      Object.keys(metrics).forEach(id => { if (!nodeIndex[id]) delete metrics[id]; });
+      calculateVSMMetrics();
     }
 
     function applyStoredPositions() {
@@ -1456,7 +1472,7 @@
     function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
     function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
     function resetZoom() { if (panZoomInstance) { panZoomInstance.resetZoom(); panZoomInstance.fit(); panZoomInstance.center(); } }
-    function clearCode() { mermaidCodeInput.value = ''; projectState.positions = {}; resetInteractionState(); updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
+    function clearCode() { mermaidCodeInput.value = ''; projectState.positions = {}; projectState.metrics = {}; resetInteractionState(); updateLineNumbers(); renderDiagram(); calculateVSMMetrics(); }
     function formatCode() { mermaidCodeInput.value = mermaidCodeInput.value.split('\n').map(l => l.trimEnd()).join('\n'); updateLineNumbers(); }
     const EXPORT_STYLE_PROPS = ['fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity', 'stroke-dasharray', 'opacity', 'font-family', 'font-size', 'font-weight', 'font-style', 'color', 'background-color', 'text-anchor', 'dominant-baseline', 'text-align', 'line-height', 'display', 'padding', 'white-space', 'overflow', 'visibility', 'filter'];
     function exportBaseName() {
@@ -1530,20 +1546,48 @@
       const a = document.createElement('a'); a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
     }
-    function exportSVG() {
+    // Native "Save as" dialog via the File System Access API. Resolves to a file handle, 'cancel' if the user dismissed the dialog,
+    // or null when the API is unavailable or blocked, so the caller can fall back to a normal <a download>.
+    async function pickSaveHandle(suggestedName, description, mime, ext) {
+      if (typeof window.showSaveFilePicker !== 'function') return null;
+      try {
+        return await window.showSaveFilePicker({ suggestedName, types: [{ description, accept: { [mime]: [ext] } }] });
+      } catch (err) {
+        return err && err.name === 'AbortError' ? 'cancel' : null;
+      }
+    }
+    // Writes the blob through the picked handle; falls back to a download if the handle cannot be written.
+    async function saveBlob(blob, fileName, handle) {
+      if (handle && handle !== 'cancel') {
+        try {
+          const w = await handle.createWritable();
+          try { await w.write(blob); } finally { await w.close(); }
+          return;
+        } catch (err) { console.warn('File picker write failed, falling back to download:', err); }
+      }
+      const url = URL.createObjectURL(blob);
+      downloadURL(url, fileName);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    async function exportSVG() {
       try {
         const out = buildStandaloneSVG();
         if (!out) { updateStatus('Nothing to export: render a diagram first', 'amber'); return; }
-        const url = URL.createObjectURL(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + out.xml], { type: 'image/svg+xml;charset=utf-8' }));
-        downloadURL(url, `${exportBaseName()}.svg`);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const name = `${exportBaseName()}.svg`;
+        const handle = await pickSaveHandle(name, 'SVG Image', 'image/svg+xml', '.svg');
+        if (handle === 'cancel') { updateStatus('Save cancelled', 'amber'); return; }
+        await saveBlob(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + out.xml], { type: 'image/svg+xml;charset=utf-8' }), name, handle);
         updateStatus('Exported SVG successfully', 'emerald');
       } catch (err) { console.error(err); updateStatus('SVG export failed', 'rose'); }
     }
-    function exportPNG() {
+    async function exportPNG() {
       let out;
       try { out = buildStandaloneSVG(); } catch (err) { console.error(err); updateStatus('PNG export failed', 'rose'); return; }
       if (!out) { updateStatus('Nothing to export: render a diagram first', 'amber'); return; }
+      const name = `${exportBaseName()}.png`;
+      // Ask for the save location first, while the click's user activation is still valid.
+      const handle = await pickSaveHandle(name, 'PNG Image', 'image/png', '.png');
+      if (handle === 'cancel') { updateStatus('Save cancelled', 'amber'); return; }
       const img = new Image();
       img.onload = () => {
         try {
@@ -1553,13 +1597,47 @@
           const ctx = canvas.getContext('2d');
           ctx.fillStyle = '#0b0f19'; ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          downloadURL(canvas.toDataURL('image/png'), `${exportBaseName()}.png`);
-          updateStatus('Exported PNG successfully', 'emerald');
+          canvas.toBlob(async (blob) => {
+            try {
+              if (!blob) throw new Error('Canvas produced no image data');
+              await saveBlob(blob, name, handle);
+              updateStatus('Exported PNG successfully', 'emerald');
+            } catch (err) { console.error(err); updateStatus('PNG export failed', 'rose'); }
+          }, 'image/png');
         } catch (err) { console.error(err); updateStatus('PNG export failed (canvas blocked)', 'rose'); }
       };
       img.onerror = () => updateStatus('PNG export failed', 'rose');
       img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(out.xml);
     }
+
+    async function copyCode() {
+      const text = mermaidCodeInput.value;
+      if (!text.trim()) { updateStatus('Nothing to copy: the editor is empty', 'amber'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (err) {
+        // Clipboard API can be blocked (permissions, insecure context); fall back to the legacy copy command.
+        const prevStart = mermaidCodeInput.selectionStart, prevEnd = mermaidCodeInput.selectionEnd;
+        mermaidCodeInput.select();
+        const ok = document.execCommand && document.execCommand('copy');
+        mermaidCodeInput.setSelectionRange(prevStart, prevEnd);
+        if (!ok) { updateStatus('Copy failed', 'rose'); return; }
+      }
+      updateStatus('Mermaid code copied to clipboard', 'emerald');
+    }
+
+    function closeSaveMenu() {
+      document.getElementById('saveMenu').classList.add('hidden');
+      document.getElementById('saveMenuBtn').setAttribute('aria-expanded', 'false');
+    }
+    function toggleSaveMenu(e) {
+      e.stopPropagation();
+      const menu = document.getElementById('saveMenu');
+      const open = menu.classList.toggle('hidden') === false;
+      document.getElementById('saveMenuBtn').setAttribute('aria-expanded', String(open));
+    }
+    document.addEventListener('click', (e) => { if (!e.target.closest('#saveMenuWrap')) closeSaveMenu(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSaveMenu(); });
   </script>
 </body>
 </html>
