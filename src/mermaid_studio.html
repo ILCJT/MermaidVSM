@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-950">
 <head>
   <meta charset="UTF-8">
@@ -136,8 +136,8 @@
           <option value="standard_process">Standard Process Flow (Decision Gates)</option>
         </optgroup>
         <optgroup label="Cross-Functional & Handoffs">
-          <option value="swimlanes">Departmental Swimlanes</option>
-          <option value="sequence">Sequence Handoff Diagram</option>
+          <option value="vsm_swimlane">Departmental Swimlanes (RMA)</option>
+          <option value="sequence_handoff">Sequence Handoff (RMA Flow)</option>
         </optgroup>
         <optgroup label="Quality & Lifecycle">
           <option value="state_lifecycle">State Machine Lifecycle</option>
@@ -402,21 +402,6 @@
           E: { title: "5. Rework / Disposition", owner: "Quality Control", ct: 30, co: 10, wip: 8, friction: true }
         }
       },
-      swimlanes: {
-        title: "Departmental Swimlane Flow",
-        mermaid: `graph TD\n    subgraph Commercial ["Sales & Commercial"]\n        A["Order Creation"]\n    end\n    subgraph Engineering ["Engineering"]\n        B["Design Review"]\n    end\n    subgraph Quality ["Quality Assurance"]\n        C["Validation & Testing"]\n    end\n    subgraph Operations ["Operations & Shipping"]\n        D["Fulfillment & Release"]\n    end\n\n    A --> B --> C --> D`,
-        metrics: {
-          A: { title: "Order Creation", owner: "Sales", ct: 15, co: 0, wip: 3, friction: false },
-          B: { title: "Design Review", owner: "Engineering", ct: 60, co: 30, wip: 10, friction: false },
-          C: { title: "Validation & Testing", owner: "Quality Assurance", ct: 40, co: 15, wip: 5, friction: false },
-          D: { title: "Fulfillment & Release", owner: "Operations", ct: 20, co: 10, wip: 2, friction: false }
-        }
-      },
-      sequence: {
-        title: "Sequence Handoff Diagram",
-        mermaid: `sequenceDiagram\n    actor Client as Customer / Client\n    participant CS as Customer Service\n    participant QA as Quality Engineer\n    participant Ops as Operations Team\n\n    Client->>CS: Request Initiation\n    CS->>QA: Technical Assessment Request\n    QA->>Ops: Authorization & Release\n    Ops-->>Client: Confirmation & Delivery`,
-        metrics: {}
-      },
       state_lifecycle: {
         title: "State Machine Lifecycle",
         mermaid: `stateDiagram-v2\n    [*] --> Draft\n    Draft --> InReview : Submit for Review\n    InReview --> Approved : Quality Verification\n    InReview --> Rejected : Failure / Revision\n    Rejected --> Draft : Re-open Ticket\n    Approved --> Archived : Close Out\n    Archived --> [*]`,
@@ -516,7 +501,8 @@
           projectState.mermaid = selected.mermaid;
           projectState.metrics = JSON.parse(JSON.stringify(selected.metrics || {}));
           projectState.edges = {};
-          projectState.positions = {}; projectState.notes = {};
+          projectState.positions = {};
+          projectState.notes = JSON.parse(JSON.stringify(selected.notes || {}));
           mermaidCodeInput.value = selected.mermaid;
           resetInteractionState();
           updateLineNumbers(); renderDiagram(); calculateVSMMetrics();
@@ -1373,6 +1359,72 @@
     const ICONS = { process_dedicated: '🏭', process_shared: '🔀', workcell: '🧩', supplier: '🏭', customer: '👑', kaizen: '💥', milk_run: '🚚', supermarket: '🏬', inspection: '🔍' };
     const stripVS = s => s.replace(/\uFE0F/g, '');
 
+    // RMA templates. Labels use the same icon badge + metrics pill markup as syncNodeToMermaid, so the inspector reads them back.
+    const tplLabel = (m) => {
+      const badge = m.icon ? `<span class='relative inline-block px-1'><span class='absolute -top-3 left-1/2 -translate-x-1/2 text-xs leading-none z-10' data-icon='${m.icon}'>${ICONS[m.icon]}</span>${m.title}</span>` : m.title;
+      const parts = [`👤 ${m.owner}`];
+      if (m.ct > 0) parts.push(`⏱️ ${m.ct}m`);
+      if (m.co > 0) parts.push(`🔄 ${m.co}m`);
+      if (m.wip > 0) parts.push(`📦 ${m.wip}pcs`);
+      return `${badge}<br/><span class='block text-[10px] opacity-80 font-mono leading-tight mt-1'>${parts.join(' | ')}</span>`;
+    };
+    const tplNode = (id, open, close, m) => `${id}${open}"${tplLabel(m)}"${close}`;
+    const FRICTION_DEF = '    classDef friction fill:#451a03,stroke:#f97316,stroke-width:2px,color:#ffedd5;';
+    const swimMetrics = {
+      CS1: { title: 'Complaint Intake', owner: 'Customer Service', icon: 'customer', ct: 15, co: 0, wip: 6, friction: false },
+      TS1: { title: 'Technical Evaluation', owner: 'Tech Support', icon: 'workcell', ct: 45, co: 10, wip: 12, friction: true },
+      WH1: { title: 'Dock Receiving', owner: 'Warehouse / Dock', icon: 'supermarket', ct: 20, co: 5, wip: 8, friction: false },
+      TI1: { title: 'Bench Testing', owner: 'Tech Inspection', icon: 'inspection', ct: 60, co: 15, wip: 10, friction: false },
+      TI2: { title: 'Epicor Defect Logging', owner: 'Tech Inspection', icon: 'process_shared', ct: 10, co: 0, wip: 0, friction: false },
+      CS2: { title: 'Final Review', owner: 'Customer Service', icon: 'process_dedicated', ct: 15, co: 0, wip: 4, friction: false },
+      AP1: { title: 'Credit Memo Issuance', owner: 'Accounts Payable', icon: 'process_dedicated', ct: 20, co: 5, wip: 3, friction: false }
+    };
+    const seqMetrics = {
+      S1: { title: 'Complaints Intake', owner: 'Customer Service', icon: 'customer', ct: 15, co: 0, wip: 6, friction: false },
+      G1: { title: 'Value over $750?', owner: 'Customer Service', icon: 'kaizen', ct: 5, co: 0, wip: 0, friction: false },
+      S2: { title: 'Direct CS Processing', owner: 'Customer Service', icon: 'process_dedicated', ct: 20, co: 0, wip: 4, friction: false },
+      S3: { title: 'TS Escalation and Evaluation', owner: 'Tech Support', icon: 'workcell', ct: 45, co: 10, wip: 12, friction: true },
+      S4: { title: 'Dock Receiving and Inspection', owner: 'Warehouse / Dock', icon: 'supermarket', ct: 25, co: 5, wip: 8, friction: false },
+      S5: { title: 'TI Bench Testing', owner: 'Tech Inspection', icon: 'inspection', ct: 60, co: 15, wip: 10, friction: false },
+      S6: { title: 'Epicor Defect Logging', owner: 'Tech Inspection', icon: 'process_shared', ct: 10, co: 0, wip: 0, friction: false },
+      S7: { title: 'CS Final Review', owner: 'Customer Service', icon: 'process_dedicated', ct: 15, co: 0, wip: 4, friction: false },
+      S8: { title: 'AP Credit Memo Issuance', owner: 'Accounts Payable', icon: 'process_dedicated', ct: 20, co: 5, wip: 3, friction: false }
+    };
+    const swimNode = (id) => tplNode(id, '[', ']', swimMetrics[id]);
+    const seqNode = (id, open = '[', close = ']') => tplNode(id, open, close, seqMetrics[id]);
+    Object.assign(TEMPLATES, {
+      vsm_swimlane: {
+        title: 'RMA Departmental Swimlanes',
+        mermaid: [
+          'graph LR',
+          '    subgraph CS ["CS - Customer Service"]', `        ${swimNode('CS1')}`, `        ${swimNode('CS2')}`, '    end',
+          '    subgraph TS ["TS - Tech Support"]', `        ${swimNode('TS1')}`, '    end',
+          '    subgraph WH ["WH - Warehouse / Dock"]', `        ${swimNode('WH1')}`, '    end',
+          '    subgraph TI ["TI - Tech Inspection"]', `        ${swimNode('TI1')}`, `        ${swimNode('TI2')}`, '    end',
+          '    subgraph AP ["AP - Accounts Payable"]', `        ${swimNode('AP1')}`, '    end',
+          '    CS1 --> TS1 --> WH1 --> TI1 --> TI2 --> CS2 --> AP1',
+          '', FRICTION_DEF, '    class TS1 friction;'
+        ].join('\n'),
+        metrics: swimMetrics,
+        notes: { note_1: { targetId: 'TS1', text: 'CS to TS handoff: confirm RMA number, complaint value and photos before escalating.', offset: { x: -130, y: -190 } } }
+      },
+      sequence_handoff: {
+        title: 'RMA Sequence Handoff',
+        mermaid: [
+          'graph LR',
+          `    ${seqNode('S1')} --> ${seqNode('G1', '{', '}')}`,
+          '    G1 -- "Under $750" --> S2',
+          '    G1 -- "$750 or more" --> S3',
+          `    ${seqNode('S2')}`, `    ${seqNode('S3')}`,
+          `    S2 --> ${seqNode('S4')}`, '    S3 --> S4',
+          `    S4 --> ${seqNode('S5')} --> ${seqNode('S6')} --> ${seqNode('S7')} --> ${seqNode('S8')}`,
+          '', FRICTION_DEF, '    class S3 friction;'
+        ].join('\n'),
+        metrics: seqMetrics,
+        notes: {}
+      }
+    });
+
     function addEdgeHitPaths(svg) {
       svg.querySelectorAll('g.edgePaths > path').forEach(p => {
         const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1847,7 +1899,8 @@
 
     function refitCanvas() {
       if (!panZoomInstance) return;
-      panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center();
+      // fit() throws "matrix not invertible" if the container is momentarily zero-sized (hidden, mid-resize).
+      try { panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center(); } catch (err) { /* retried on the next render or resize */ }
     }
     function toggleEditorPanel() {
       const body = document.getElementById('editorBody');

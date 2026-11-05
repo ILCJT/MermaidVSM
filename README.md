@@ -15,7 +15,7 @@ Mermaid Studio is an interactive, single-file HTML / ES6 / Tailwind CSS workspac
 - **Bottom metric sub-pills:** Owner 👤, Cycle Time ⏱️, Changeover 🔄 and WIP 📦 render under the node title.
 - **VSM summary ladder:** VA time, lead time, total WIP, friction points and efficiency update live.
 - **Object Library:** add Process, Decision and Buffer/WIP nodes, connect nodes visually, and delete the selected node or edge.
-- **Templates:** Value Stream Map, Standard Process Flow, Swimlanes, Sequence, State Machine and Root Cause Tree.
+- **Templates:** Value Stream Map, Standard Process Flow, RMA Departmental Swimlanes (CS/TS/WH/TI/AP lanes, with metrics, icons and a CS-to-TS handoff note), RMA Sequence Handoff (`graph LR` with a $750 decision gate), State Machine and Root Cause Tree.
 - **Base64 URL parameter state hydration:** open a project from a link with `?state=<base64 of a .vsm.json>` (see below).
 - **Process Notes:** select a node and click **📝 Add Note** to attach a draggable yellow note card with a dashed connector. Notes are saved in `.vsm.json` and included in PNG/SVG exports.
 - **Import / export:** drag-and-drop `.vsm.json` project files. A single **Save Image** menu exports PNG (2x), SVG or the raw Mermaid code (`.txt`) through the native "Save as" dialog (File System Access API) where supported, with a normal download as fallback. The `.vsm.json` project file is a secondary item in that menu. **Copy Code** in the editor card copies the raw Mermaid syntax.
