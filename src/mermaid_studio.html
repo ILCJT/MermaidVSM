@@ -41,8 +41,10 @@
     }
     /* Invisible padded stroke (added by addEdgeHitPaths) so thin lines are easy to click */
     #mermaidRender .edge-hit { stroke: transparent !important; stroke-width: 14px !important; fill: none !important; stroke-dasharray: none !important; cursor: pointer; pointer-events: stroke; }
-    /* The canvas keeps native pan gestures; only node shapes opt out so a touch drag moves the node instead of being claimed by the browser. */
-    #mermaidRender { user-select: none; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+    /* Canvas isolation: the app owns every gesture on the canvas (svg-pan-zoom pans/pinches, node drags move nodes), so the browser must not
+       scroll, bounce, pull-to-refresh or select text. Only the canvas is affected; panels and inputs keep normal touch behaviour. */
+    html, body { overscroll-behavior: none; }
+    #canvasContainer, #mermaidRender { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
     #mermaidRender g.nodes > g { touch-action: none; }
     #mermaidRender .node foreignObject, #mermaidRender .node foreignObject div { overflow: visible !important; }
     @keyframes connectPulse { 0%, 100% { stroke-opacity: 1; stroke-width: 3px; } 50% { stroke-opacity: 0.35; stroke-width: 5px; } }
@@ -54,13 +56,16 @@
     #mermaidRender g.process-note text { user-select: none; pointer-events: none; }
     /* Mobile: 44px touch targets in the inspector, safe-area insets for floating bottom panels */
     /* --ladder-h is kept in sync with the summary bar's real height (it wraps on narrow screens) so floating panels always sit above it */
-    #editorPanel { bottom: calc(var(--ladder-h, 2.75rem) + 0.5rem + env(safe-area-inset-bottom, 0px)); }
-    #zoomControls { bottom: calc(var(--ladder-h, 2.75rem) + 0.75rem + env(safe-area-inset-bottom, 0px)); }
-    #vsmSummaryLadder { padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px)); }
+    :root { --safe-b: env(safe-area-inset-bottom, 0px); }
+    @supports (height: 100dvh) { html, body { height: 100dvh; } }
+    #editorPanel { bottom: calc(var(--ladder-h, 2.75rem) + 0.5rem + var(--safe-b)); }
+    #zoomControls { bottom: calc(var(--ladder-h, 2.75rem) + 0.75rem + var(--safe-b)); }
+    #vsmSummaryLadder { padding-bottom: calc(0.625rem + var(--safe-b)); }
+    .sheet-handle, .mobile-only { display: none; }
     #inspectorDrawer { width: clamp(280px, 85vw, 360px); max-width: calc(100vw - 1.5rem); max-height: calc(100% - 9.5rem); }
     #inspectorDrawer.inspector-collapsed { overflow: hidden; }
     /* Visually hidden rather than display:none so a focused input keeps focus while the drawer is minimized */
-    #inspectorDrawer.inspector-collapsed > :not(#inspectorHeader) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); padding: 0; margin: 0; border: 0; white-space: nowrap; }
+    #inspectorDrawer.inspector-collapsed > :not(#inspectorHeader):not(.sheet-handle) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); padding: 0; margin: 0; border: 0; white-space: nowrap; }
     #inspectorDrawer.inspector-collapsed #inspectorHeader { border-bottom-width: 0; }
     .inspector-body { padding: 1rem; }
     .inspector-body > * + * { margin-top: 1rem; }
@@ -74,17 +79,42 @@
     }
     @media (max-width: 899px) { #inspectorDrawer .inspector-word { display: none; } }
     @media (max-height: 700px) { #editorBody { height: 200px; } }
-    @media (pointer: coarse) {
-      header button, header select, header label, #objectLibrary button, #editorPanel button, #zoomControls button { min-height: 44px; }
+    /* 44px touch targets (phones and any coarse pointer). Connector hit paths use a screen-space stroke so they stay 44px wide at any zoom. */
+    @media (pointer: coarse), (max-width: 767px) {
+      header button, header select, header label, #saveMenu button, #objectLibrary button, #editorPanel button, #zoomControls button { min-height: 44px; }
       #zoomControls button, #editorPanel button { min-width: 44px; }
       #inspectorDrawer button, #inspectorDrawer select, #inspectorDrawer input:not([type="checkbox"]) { min-height: 44px; }
+      #mermaidRender .edge-hit { vector-effect: non-scaling-stroke; stroke-width: 44px !important; }
     }
+    /* Phones: overlays become bottom sheets (one visible at a time) and the primary actions live in a floating bottom bar. */
     @media (max-width: 767px) {
-      #inspectorDrawer button, #inspectorDrawer select, #inspectorDrawer input:not([type="checkbox"]) { min-height: 44px; }
-      #inspectorDrawer { left: auto; right: 0.75rem; top: auto; bottom: calc(var(--ladder-h, 2.75rem) + 3.25rem + env(safe-area-inset-bottom, 0px)); max-height: calc(100% - var(--ladder-h, 2.75rem) - 7.75rem); z-index: 40; }
+      :root { --safe-b: 0px; --nav-h: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+      body { padding-bottom: var(--nav-h); }
+      .mobile-only { display: flex; }
+      #actionBar { position: fixed; left: 0.5rem; right: 0.5rem; bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px)); margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.375rem; padding: 0.375rem; background: rgba(15, 23, 42, 0.96); border: 1px solid #334155; border-radius: 1rem; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px); z-index: 60; }
+      #actionBar > *, #actionBar button > * { margin: 0 !important; }
+      #saveMenuWrap { display: flex; }
+      #actionBar button, #actionBar label { min-height: 48px; width: 100%; flex-direction: column; justify-content: center; align-items: center; gap: 2px; font-size: 10px; padding: 0.25rem; }
+      #actionBar label span { display: inline !important; }
+      #saveMenuBtn [data-lucide="chevron-down"] { display: none; }
+      #saveMenu { top: auto; bottom: calc(100% + 0.5rem); right: 0; width: min(16rem, calc(100vw - 1rem)); }
+      #saveMenu button { font-size: 13px; }
       #zoomControls { top: 0.75rem; bottom: auto; right: 0.75rem; }
+
+      #objectLibrary, #inspectorDrawer, #editorPanel { left: 0; right: 0; top: auto; width: auto; max-width: none; bottom: var(--ladder-h, 2.75rem); border-radius: 1rem 1rem 0 0; border-bottom-width: 0; z-index: 40; }
+      #objectLibrary { max-height: min(55%, 360px) !important; padding: 0 0.5rem 0.5rem; }
+      #inspectorDrawer { max-height: min(72%, 560px); }
+      #editorPanel { max-height: min(70%, 420px); }
+      #libraryBody { display: grid; grid-template-columns: 1fr 1fr; gap: 0.375rem; }
+      #objectLibrary.lib-collapsed, #editorPanel.editor-collapsed, #inspectorDrawer.sheet-yield { display: none; }
+      #editorHeader { height: auto; min-height: 44px; flex-wrap: wrap; gap: 0.25rem; }
+      #editorToggleBtn { display: none; }
       #inspectorDrawer label.inspector-check { min-height: 44px; display: flex; align-items: center; }
       #inspectorDrawer input[type="checkbox"] { width: 1.5rem; height: 1.5rem; }
+      .sheet-handle { display: flex; position: relative; z-index: 2; flex-shrink: 0; align-items: center; justify-content: center; height: 32px; touch-action: none; cursor: grab; user-select: none; }
+      .sheet-handle::before { content: ''; width: 40px; height: 4px; border-radius: 2px; background: #475569; }
+      .sheet-handle::after { content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: -12px; }
+      #inspectorDrawer > .sheet-handle { position: sticky; top: 0; background: rgba(15, 23, 42, 0.98); border-radius: 1rem 1rem 0 0; }
     }
   </style>
 </head>
@@ -115,7 +145,9 @@
         </optgroup>
       </select>
     </div>
-    <div class="flex items-center space-x-1.5 ml-auto">
+    <div id="actionBar" class="flex items-center space-x-1.5 ml-auto">
+      <button type="button" id="navAddBtn" onclick="toggleObjectLibrary()" class="mobile-only px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-md text-slate-200 text-xs font-medium items-center"><i data-lucide="plus-square" class="w-4 h-4 text-emerald-400"></i><span>Add</span></button>
+      <button type="button" id="navCodeBtn" onclick="toggleEditorPanel()" class="mobile-only px-2 py-1.5 bg-slate-800 border border-slate-700 rounded-md text-slate-200 text-xs font-medium items-center"><i data-lucide="code-2" class="w-4 h-4 text-sky-400"></i><span>Code</span></button>
       <label class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md text-slate-200 text-xs font-medium flex items-center space-x-1 cursor-pointer transition">
         <i data-lucide="folder-open" class="w-3.5 h-3.5 text-amber-400"></i>
         <span class="hidden sm:inline">Open</span>
@@ -139,6 +171,7 @@
   </header>
   <main id="dropZone" class="flex-1 flex relative overflow-hidden">
     <section id="editorPanel" class="absolute bottom-12 left-3 w-80 sm:w-96 max-h-[320px] bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all overflow-hidden">
+      <div class="sheet-handle" data-sheet="editor" role="separator" aria-label="Drag down to close the code editor"></div>
       <div id="editorHeader" onclick="if (!event.target.closest('button')) toggleEditorPanel()" class="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400 shrink-0 h-9 cursor-pointer select-none">
         <span class="font-mono text-[11px] text-slate-400 flex items-center gap-1.5"><i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-500"></i> diagram.mmd</span>
         <div class="flex items-center space-x-2">
@@ -168,6 +201,7 @@
         </div>
       </div>
       <div id="objectLibrary" class="absolute top-3 left-3 w-44 bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 backdrop-blur-md p-2 flex flex-col gap-1.5 overflow-y-auto" style="max-height: calc(100vh - 320px);">
+        <div class="sheet-handle" data-sheet="library" role="separator" aria-label="Drag down to close the object library"></div>
         <div id="libraryHeader" onclick="toggleObjectLibrary()" class="px-1 flex items-center justify-between cursor-pointer select-none text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           <span>Object Library</span>
           <button id="libraryToggleBtn" aria-expanded="true" title="Collapse / expand library" class="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-800 hover:text-slate-200 text-sm leading-none normal-case">−</button>
@@ -190,6 +224,7 @@
         <div id="mermaidRender" class="w-full h-full flex items-center justify-center"></div>
       </div>
       <aside id="inspectorDrawer" class="hidden absolute top-3 right-3 max-h-[calc(100vh-180px)] bg-slate-900/95 border border-slate-800 rounded-xl shadow-2xl z-30 flex flex-col backdrop-blur-md transition-all overflow-y-auto">
+        <div class="sheet-handle" data-sheet="inspector" role="separator" aria-label="Drag down to minimize, up to expand"></div>
         <div id="inspectorHeader" class="p-3 border-b border-slate-800 flex items-center justify-between gap-1">
           <div class="flex items-center space-x-1 bg-slate-800 p-0.5 rounded-md border border-slate-700 min-w-0">
             <button id="tabNodeInspector" onclick="switchInspectorTab('node')" class="flex items-center space-x-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-blue-600 text-white shadow transition whitespace-nowrap">
@@ -1269,7 +1304,12 @@
       btn.setAttribute('aria-expanded', String(!collapsed));
       btn.title = collapsed ? 'Expand inspector' : 'Minimize inspector';
     }
-    function showInspectorDrawer() { setInspectorCollapsed(false); inspectorDrawer.classList.remove('hidden'); }
+    function showInspectorDrawer() {
+      setInspectorCollapsed(false);
+      // Phones: the inspector sheet replaces the library sheet.
+      if (mobileMQ.matches) setLibraryCollapsed(true);
+      inspectorDrawer.classList.remove('hidden', 'sheet-yield');
+    }
     function toggleInspectorCollapsed() { setInspectorCollapsed(!inspectorDrawer.classList.contains('inspector-collapsed')); }
 
     function closeInspector() { inspectorDrawer.classList.add('hidden'); setInspectorCollapsed(false); activeNodeId = null; activeEdge = null; setActiveNote(null); }
@@ -1812,8 +1852,9 @@
     function toggleEditorPanel() {
       const body = document.getElementById('editorBody');
       const collapsed = body.classList.toggle('hidden');
-      // On phones the inspector docks in the same strip, so only one of the two is open at a time.
-      if (!collapsed && mobileMQ.matches) closeInspector();
+      document.getElementById('editorPanel').classList.toggle('editor-collapsed', collapsed);
+      // On phones the sheets share one slot, so only one of editor / inspector / library is open at a time.
+      if (!collapsed && mobileMQ.matches) { closeInspector(); setLibraryCollapsed(true); }
       const btn = document.getElementById('editorToggleBtn');
       btn.innerHTML = `<i data-lucide="${collapsed ? 'chevron-up' : 'chevron-down'}" class="w-4 h-4"></i>`;
       lucide.createIcons();
@@ -1821,9 +1862,15 @@
     }
     function setLibraryCollapsed(collapsed) {
       document.getElementById('libraryBody').classList.toggle('hidden', collapsed);
+      document.getElementById('objectLibrary').classList.toggle('lib-collapsed', collapsed);
       const btn = document.getElementById('libraryToggleBtn');
       btn.textContent = collapsed ? '+' : '−';
       btn.setAttribute('aria-expanded', String(!collapsed));
+      if (mobileMQ.matches) {
+        // The library sheet covers the inspector's slot: hide the inspector without deselecting so Add Note still has its node.
+        inspectorDrawer.classList.toggle('sheet-yield', !collapsed);
+        if (!collapsed) setEditorCollapsed(true);
+      }
     }
     function toggleObjectLibrary() {
       setLibraryCollapsed(!document.getElementById('libraryBody').classList.contains('hidden'));
@@ -1835,7 +1882,77 @@
       if (body.classList.contains('hidden') === collapsed) return;
       toggleEditorPanel();
     }
+    // Swipe/drag handle for the phone bottom sheets: the sheet follows a downward drag, then a release past the threshold runs `down`,
+    // an upward flick runs `up`, and a plain tap runs `tap`. Pointer capture keeps the gesture alive if the finger leaves the handle.
+    function bindSheetHandle(handle, sheet, { up, down, tap }) {
+      let g = null;
+      const reset = () => { sheet.style.transition = ''; sheet.style.transform = ''; };
+      handle.addEventListener('pointerdown', (e) => {
+        if (!mobileMQ.matches || !e.isPrimary) return;
+        g = { id: e.pointerId, y0: e.clientY, dy: 0 };
+        try { handle.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
+        sheet.style.transition = 'none';
+      });
+      handle.addEventListener('pointermove', (e) => {
+        if (!g || e.pointerId !== g.id) return;
+        g.dy = e.clientY - g.y0;
+        sheet.style.transform = g.dy > 0 ? `translateY(${g.dy}px)` : '';
+      });
+      const finish = (e, cancelled) => {
+        if (!g || e.pointerId !== g.id) return;
+        const { dy } = g; g = null;
+        try { if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId); } catch (err) { /* released already */ }
+        reset();
+        if (cancelled) return;
+        if (dy > 56) down?.(); else if (dy < -40) up?.(); else if (Math.abs(dy) < 8) tap?.();
+      };
+      handle.addEventListener('pointerup', (e) => finish(e, false));
+      handle.addEventListener('pointercancel', (e) => finish(e, true));
+    }
+    // svg-pan-zoom has no built-in pinch (needs Hammer), so two-finger zoom is handled here.
+    function initPinchZoom() {
+      const host = document.getElementById('canvasContainer');
+      const pts = new Map();
+      let startDist = 0, startZoom = 1;
+      const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+      host.addEventListener('pointerdown', e => {
+        if (e.pointerType !== 'touch') return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // Pan must be off while pinching, otherwise svg-pan-zoom's own touch pan rewrites the matrix each move.
+        if (pts.size === 2 && panZoomInstance) { startDist = dist() || 1; startZoom = panZoomInstance.getZoom(); panZoomInstance.disablePan(); }
+      }, true);
+      host.addEventListener('pointermove', e => {
+        if (!pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pts.size !== 2 || !panZoomInstance || drag) return;
+        const [a, b] = [...pts.values()];
+        const r = host.getBoundingClientRect();
+        panZoomInstance.zoomAtPoint(startZoom * dist() / startDist, { x: (a.x + b.x) / 2 - r.left, y: (a.y + b.y) / 2 - r.top });
+      }, true);
+      const up = e => {
+        if (!pts.delete(e.pointerId)) return;
+        if (pts.size === 0 && panZoomInstance && !drag) panZoomInstance.enablePan();
+      };
+      host.addEventListener('pointerup', up, true);
+      host.addEventListener('pointercancel', up, true);
+    }
+
+    function initSheetHandles() {
+      const handle = (name) => document.querySelector(`.sheet-handle[data-sheet="${name}"]`);
+      const inspectorCollapsed = () => inspectorDrawer.classList.contains('inspector-collapsed');
+      bindSheetHandle(handle('inspector'), inspectorDrawer, {
+        down: () => { if (inspectorCollapsed()) closeInspector(); else setInspectorCollapsed(true); },
+        up: () => setInspectorCollapsed(false),
+        tap: toggleInspectorCollapsed
+      });
+      const closeLibrary = () => setLibraryCollapsed(true);
+      bindSheetHandle(handle('library'), document.getElementById('objectLibrary'), { down: closeLibrary, tap: closeLibrary });
+      const closeEditor = () => setEditorCollapsed(true);
+      bindSheetHandle(handle('editor'), document.getElementById('editorPanel'), { down: closeEditor, tap: closeEditor });
+    }
     function applyMobileCollapse() {
+      initSheetHandles();
+      initPinchZoom();
       setEditorCollapsed(true);
       setLibraryCollapsed(mobileMQ.matches);
       const ladder = document.getElementById('vsmSummaryLadder');

@@ -51,7 +51,7 @@ Browsers and servers limit URL length, so this suits small to medium projects. U
 
 ## Mobile
 
-Below 768px the code editor starts collapsed (reopen with its chevron), the inspector docks as a bottom sheet, inspector controls have 44px touch targets, and floating bottom panels respect `env(safe-area-inset-bottom)` (`viewport-fit=cover`). Reload after resizing across the breakpoint to reset the editor state.
+Below 768px the Object Library, Node/Edge Inspector and Code editor become full-width bottom sheets above the summary bar, each with a grab handle (swipe down to close or minimize, swipe up to expand, tap to toggle). Only one sheet is open at a time; opening the inspector hides the library. Open, Save Image, Add and Code move to a floating bottom navigation bar. Buttons, menu items and library/inspector controls are at least 44px, and edge connectors have a 44px hit area. The canvas uses `touch-action: none` with `user-select: none` (no pull-to-refresh or text selection); one finger drags nodes or pans, two fingers pinch-zoom. Panels respect `env(safe-area-inset-bottom)`. Reload after resizing across the breakpoint to reset the editor state.
 
 ## Documentation
 
